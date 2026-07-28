@@ -389,6 +389,10 @@ textarea.input {
 .plate-guide.is-aligned .plate-guide-label {
   color: #4ade80;
 }
+.plate-guide-label-hint {
+  color: #fbbf24 !important;
+  font-weight: 700;
+}
 
 /* Preview προεπεξεργασμένης εικόνας */
 .ocr-preview {

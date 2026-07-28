@@ -55,14 +55,16 @@ export function preprocessForOcr(
  * με preprocessForOcr (διπλή πολικότητα + αφαίρεση θορύβου) αλλά σε πολύ
  * μικρότερη ανάλυση και ΧΩΡΙΣ να φτιάξει το τελικό canvas.
  *
- * @returns {{ok: boolean, kept: number}} kept = πόσα «character blobs» βρέθηκαν
+ * @returns {{ok: boolean, kept: number, coverage: number}} kept = πόσα
+ *   «character blobs» βρέθηκαν, coverage = πόσο πλάτος του crop καλύπτουν
+ *   άκρη-σε-άκρη (0..1) — χρήσιμο για το hint απόστασης.
  */
 export function assessPlateAlignment(source, { targetWidth = 450 } = {}) {
   const { gray, w, h, threshold } = grayscaleAndThreshold(source, targetWidth);
   const darkOnLight = toBinary(gray, w, h, threshold, false);
   const lightOnDark = toBinary(gray, w, h, threshold, true);
   const best = pickPolarity(keepCharacterBlobs(darkOnLight), keepCharacterBlobs(lightOnDark));
-  return { ok: best.ok, kept: best.kept };
+  return { ok: best.ok, kept: best.kept, coverage: best.coverage || 0 };
 }
 
 // Μια ελληνική πινακίδα έχει 6 (μηχανή) ή 7 (αυτοκίνητο) χαρακτήρες.
@@ -241,7 +243,7 @@ function keepCharacterBlobs(bin) {
       }
     }
 
-    blobs.push({ id, count, w: maxX - minX + 1, h: maxY - minY + 1 });
+    blobs.push({ id, count, minX, maxX, w: maxX - minX + 1, h: maxY - minY + 1 });
   }
 
   // Πρώτο φιλτράρισμα: μέγεθος/σχήμα σε σχέση με το καρέ
@@ -274,7 +276,22 @@ function keepCharacterBlobs(bin) {
   for (let p = 0; p < n; p++) {
     if (data[p] === FG && keep[labels[p]]) out[p] = FG;
   }
-  return { bin: { data: out, w, h }, ok: true, kept };
+
+  // Πόσο πλάτος του crop καλύπτουν οι κρατημένοι χαρακτήρες, άκρη-σε-άκρη.
+  // Χρησιμοποιείται ΜΟΝΟ για το ζωντανό hint απόστασης (πλησίασε/απομακρύνσου),
+  // όχι για το ίδιο το OCR — μια μικρή coverage σημαίνει η πινακίδα «πνίγεται»
+  // μέσα σε πολύ φόντο (μακριά), μια πολύ μεγάλη ότι αγγίζει τις άκρες του
+  // πλαισίου-οδηγού (κοντά, ρίσκο να κοπεί χαρακτήρας).
+  let minX = w;
+  let maxX = -1;
+  for (const b of candidates) {
+    if (!keep[b.id]) continue;
+    if (b.minX < minX) minX = b.minX;
+    if (b.maxX > maxX) maxX = b.maxX;
+  }
+  const coverage = maxX >= minX ? (maxX - minX + 1) / w : 0;
+
+  return { bin: { data: out, w, h }, ok: true, kept, coverage };
 }
 
 // --------------------------------------------------------------------

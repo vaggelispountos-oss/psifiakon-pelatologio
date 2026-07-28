@@ -28,6 +28,17 @@ function looksAligned(mode, ok, kept) {
   return ok && kept >= EXPECTED_CHARS[mode] - 1;
 }
 
+// Πόσο πλάτος του πλαισίου-οδηγού πρέπει να καλύπτουν οι χαρακτήρες
+// άκρη-σε-άκρη ώστε η απόσταση να θεωρείται καλή. Κάτω απ' αυτό η πλάκα
+// «πνίγεται» σε φόντο (μακριά)· πάνω απ' αυτό αγγίζει τις άκρες (κοντά,
+// ρίσκο να κοπεί χαρακτήρας ή να θολώσει η εστίαση).
+const MIN_COVERAGE = 0.5;
+const MAX_COVERAGE = 0.93;
+
+// Πόσα συνεχόμενα «πράσινα» περάσματα χρειάζονται πριν σκανάρει μόνο του —
+// ένα-δύο τυχαία frames δεν αρκούν, θέλουμε να είναι σταθερά ευθυγραμμισμένη.
+const AUTO_SCAN_STABLE_TICKS = 2;
+
 // Πλαίσιο-οδηγός ανά τύπο οχήματος. Το σχήμα του πλαισίου έχει ΤΕΡΑΣΤΙΑ
 // σημασία: ό,τι περισσεύει γύρω από την πλάκα (προφυλακτήρας, βίδες,
 // αυτοκόλλητα) μπαίνει στο OCR ως θόρυβος. Ένα τετραγωνισμένο πλαίσιο πάνω σε
@@ -93,6 +104,14 @@ export default function CameraCapture({ onConfirm, disabled }) {
   const [warnings, setWarnings] = useState([]);
   const [preview, setPreview] = useState(null); // dataURL προεπεξεργασμένης εικόνας
   const [aligned, setAligned] = useState(false); // ζωντανό feedback πλαισίου
+  // Κατεύθυνση διόρθωσης απόστασης ("closer" | "back" | null) — ζωντανό hint
+  // πάνω στο πλαίσιο-οδηγό, βασισμένο στο πόσο χώρο καλύπτουν οι χαρακτήρες.
+  const [distanceHint, setDistanceHint] = useState(null);
+  // Πόσα συνεχόμενα «πράσινα» περάσματα έχουμε δει — για auto-scan σταθερότητας.
+  const stableAlignedTicksRef = useRef(0);
+  // true όσο ισχύει η τρέχουσα «ευθυγραμμισμένη περίοδος» — ώστε να μη
+  // ξανασκανάρει αυτόματα σε κάθε tick όσο ο χρήστης κρατά ακίνητο το όχημα.
+  const autoScannedRef = useRef(false);
   // id της ΤΕΛΕΥΤΑΙΑΣ σάρωσης στο backend (OcrMetric) — για να ενημερώσουμε
   // αν τελικά ο χρήστης το διόρθωσε χειροκίνητα, όταν πατήσει «Δημιουργία».
   const lastMetricIdRef = useRef(null);
@@ -109,6 +128,9 @@ export default function CameraCapture({ onConfirm, disabled }) {
   useEffect(() => {
     if (!cameraOn) {
       setAligned(false);
+      setDistanceHint(null);
+      stableAlignedTicksRef.current = 0;
+      autoScannedRef.current = false;
       return;
     }
     let cancelled = false;
@@ -129,8 +151,37 @@ export default function CameraCapture({ onConfirm, disabled }) {
         canvas.width = sw;
         canvas.height = sh;
         canvas.getContext("2d").drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
-        const { ok, kept } = assessPlateAlignment(canvas);
-        if (!cancelled) setAligned(looksAligned(mode, ok, kept));
+        const { ok, kept, coverage } = assessPlateAlignment(canvas);
+        const isAligned = looksAligned(mode, ok, kept);
+        if (cancelled) return;
+
+        setAligned(isAligned);
+        // Hint κατεύθυνσης απόστασης — μόνο όταν έχουμε αξιόπιστο σήμα
+        // (κάποιοι χαρακτήρες εντοπίστηκαν) αλλά ΔΕΝ είναι ακόμα ευθυγραμμισμένη·
+        // αλλιώς μπορεί να είναι θέμα θαμπάδας/φωτισμού, όχι απόστασης.
+        if (!isAligned && ok) {
+          if (coverage < MIN_COVERAGE) setDistanceHint("closer");
+          else if (coverage > MAX_COVERAGE) setDistanceHint("back");
+          else setDistanceHint(null);
+        } else {
+          setDistanceHint(null);
+        }
+
+        // Auto-scan: μόλις μείνει σταθερά ευθυγραμμισμένη για λίγα tick,
+        // σκανάρει μόνη της — ο χρήστης δεν χρειάζεται να ξαναπατήσει τίποτα.
+        if (isAligned) {
+          stableAlignedTicksRef.current += 1;
+          if (
+            stableAlignedTicksRef.current >= AUTO_SCAN_STABLE_TICKS &&
+            !autoScannedRef.current
+          ) {
+            autoScannedRef.current = true;
+            captureAndRecognize();
+          }
+        } else {
+          stableAlignedTicksRef.current = 0;
+          autoScannedRef.current = false;
+        }
       } finally {
         busy = false;
       }
@@ -259,8 +310,9 @@ export default function CameraCapture({ onConfirm, disabled }) {
       <h2>1ος Χρόνος — Είσοδος οχήματος</h2>
       <p className="muted">
         Διάλεξε τύπο οχήματος και ευθυγράμμισε την πλάκα μέσα στο πλαίσιο· θα
-        γίνει ΠΡΑΣΙΝΟ όταν φαίνεται καθαρά. Αν μείνει κόκκινο, απομακρύνσου
-        λίγο — πολύ κοντά η κάμερα δεν εστιάζει καλά. Μετά πάτα «Σκάναρε».
+        γίνει ΠΡΑΣΙΝΟ όταν φαίνεται καθαρά και σκανάρει μόνη της. Ακολούθησε
+        τις οδηγίες απόστασης αν εμφανιστούν, ή πάτα «Σκάναρε» χειροκίνητα
+        όποτε θες.
       </p>
 
       <div className="mode-toggle">
@@ -288,8 +340,18 @@ export default function CameraCapture({ onConfirm, disabled }) {
               aspectRatio: `${GUIDES[mode].aspect}`,
             }}
           >
-            <span className="plate-guide-label">
-              {aligned ? "✓ Έτοιμο" : GUIDES[mode].label}
+            <span
+              className={`plate-guide-label${
+                distanceHint ? " plate-guide-label-hint" : ""
+              }`}
+            >
+              {aligned
+                ? "✓ Έτοιμο"
+                : distanceHint === "closer"
+                ? "🔎 Λίγο πιο μπροστά"
+                : distanceHint === "back"
+                ? "↔️ Λίγο πιο πίσω"
+                : GUIDES[mode].label}
             </span>
           </div>
         )}
