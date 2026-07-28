@@ -334,6 +334,11 @@ export default function CameraCapture({ onConfirm, disabled }) {
     onConfirm(value);
   }
 
+  // 100% βεβαιότητα ΚΑΙ καμία επιφύλαξη parser -> σίγουρη ανάγνωση, όχι απλά
+  // "αρκετά καλή". Τότε αξίζει να καθοδηγήσουμε ρητά τον χρήστη στο επόμενο
+  // βήμα αντί να τον αφήσουμε να ψάχνει τι κάνει.
+  const isPerfect = confidence === 100 && warnings.length === 0 && !!plate;
+
   return (
     <div className="card">
       <h2>1ος Χρόνος — Είσοδος οχήματος</h2>
@@ -477,12 +482,24 @@ export default function CameraCapture({ onConfirm, disabled }) {
 
       {error && <div className="alert alert-error">{error}</div>}
 
+      {/* 100% σίγουρη ανάγνωση, χωρίς επιφυλάξεις -> καθοδήγησε καθαρά τον
+          χρήστη στο επόμενο βήμα αντί να τον αφήσουμε να αναρωτιέται τι
+          κάνει μετά. */}
+      {isPerfect && (
+        <div className="scan-success-hint">
+          <span className="scan-success-check">✓ Άψογη ανάγνωση!</span>
+          <span className="scan-success-arrow">⌄</span>
+        </div>
+      )}
+
       <button
-        className="btn btn-primary btn-block"
+        className={`btn btn-block${isPerfect ? " btn-success" : " btn-primary"}`}
         onClick={handleConfirm}
         disabled={disabled || ocrRunning}
       >
-        ➕ Δημιουργία εγγραφής (SendClient)
+        {isPerfect
+          ? "✓ Δημιουργία εγγραφής"
+          : "➕ Δημιουργία εγγραφής (SendClient)"}
       </button>
     </div>
   );
