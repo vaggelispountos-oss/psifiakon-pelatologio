@@ -104,6 +104,8 @@ export default function CameraCapture({ onConfirm, disabled }) {
   const [warnings, setWarnings] = useState([]);
   const [preview, setPreview] = useState(null); // dataURL προεπεξεργασμένης εικόνας
   const [aligned, setAligned] = useState(false); // ζωντανό feedback πλαισίου
+  const [flashSupported, setFlashSupported] = useState(false);
+  const [flashOn, setFlashOn] = useState(false);
   // Κατεύθυνση διόρθωσης απόστασης ("closer" | "back" | null) — ζωντανό hint
   // πάνω στο πλαίσιο-οδηγό, βασισμένο στο πόσο χώρο καλύπτουν οι χαρακτήρες.
   const [distanceHint, setDistanceHint] = useState(null);
@@ -151,7 +153,7 @@ export default function CameraCapture({ onConfirm, disabled }) {
         canvas.width = sw;
         canvas.height = sh;
         canvas.getContext("2d").drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
-        const { ok, kept, coverage } = assessPlateAlignment(canvas);
+        const { ok, kept, coverage, touchesEdge } = assessPlateAlignment(canvas);
         const isAligned = looksAligned(mode, ok, kept);
         if (cancelled) return;
 
@@ -159,8 +161,13 @@ export default function CameraCapture({ onConfirm, disabled }) {
         // Hint κατεύθυνσης απόστασης — μόνο όταν έχουμε αξιόπιστο σήμα
         // (κάποιοι χαρακτήρες εντοπίστηκαν) αλλά ΔΕΝ είναι ακόμα ευθυγραμμισμένη·
         // αλλιώς μπορεί να είναι θέμα θαμπάδας/φωτισμού, όχι απόστασης.
+        // ΠΡΟΤΕΡΑΙΟΤΗΤΑ στο touchesEdge: αν κάποιος χαρακτήρας αγγίζει την
+        // άκρη του πλαισίου, η πινακίδα ήδη ξεφεύγει από το κάδρο — είναι
+        // ΠΟΛΥ κοντά, ό,τι κι αν λέει η coverage των ορατών χαρακτήρων
+        // (λίγοι, στριμωγμένοι χαρακτήρες μπορεί να δείχνουν ψευδώς «μακριά»).
         if (!isAligned && ok) {
-          if (coverage < MIN_COVERAGE) setDistanceHint("closer");
+          if (touchesEdge) setDistanceHint("back");
+          else if (coverage < MIN_COVERAGE) setDistanceHint("closer");
           else if (coverage > MAX_COVERAGE) setDistanceHint("back");
           else setDistanceHint(null);
         } else {
@@ -206,6 +213,14 @@ export default function CameraCapture({ onConfirm, disabled }) {
         await videoRef.current.play();
       }
       setCameraOn(true);
+
+      // Φλας (torch) — υποστηρίζεται μόνο σε μερικά Android/Chrome, ΟΧΙ σε
+      // iOS Safari. Ελέγχουμε τις δυνατότητες του track πριν δείξουμε το
+      // κουμπί, ώστε να μην εμφανίζεται κάτι που δεν κάνει τίποτα.
+      const [track] = stream.getVideoTracks();
+      const capabilities = track?.getCapabilities?.();
+      setFlashSupported(!!capabilities?.torch);
+      setFlashOn(false);
     } catch (err) {
       setError(
         "Δεν ήταν δυνατή η πρόσβαση στην κάμερα. Έλεγξε τα δικαιώματα. " +
@@ -220,6 +235,20 @@ export default function CameraCapture({ onConfirm, disabled }) {
       streamRef.current = null;
     }
     setCameraOn(false);
+    setFlashSupported(false);
+    setFlashOn(false);
+  }
+
+  async function toggleFlash() {
+    const [track] = streamRef.current?.getVideoTracks() || [];
+    if (!track) return;
+    const next = !flashOn;
+    try {
+      await track.applyConstraints({ advanced: [{ torch: next }] });
+      setFlashOn(next);
+    } catch (err) {
+      setError("Δεν ήταν δυνατή η ενεργοποίηση του φλας. (" + err.message + ")");
+    }
   }
 
   async function captureAndRecognize() {
@@ -332,6 +361,15 @@ export default function CameraCapture({ onConfirm, disabled }) {
       <div className="camera-frame" ref={frameRef}>
         <video ref={videoRef} playsInline muted className="camera-video" />
         {!cameraOn && <div className="camera-placeholder">Κάμερα κλειστή</div>}
+        {cameraOn && flashSupported && (
+          <button
+            type="button"
+            className={`flash-toggle${flashOn ? " is-on" : ""}`}
+            onClick={toggleFlash}
+          >
+            {flashOn ? "🔦 Φλας ON" : "🔦 Φλας"}
+          </button>
+        )}
         {cameraOn && (
           <div
             className={`plate-guide${aligned ? " is-aligned" : ""}`}

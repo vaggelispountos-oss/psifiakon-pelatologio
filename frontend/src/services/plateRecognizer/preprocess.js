@@ -55,16 +55,23 @@ export function preprocessForOcr(
  * με preprocessForOcr (διπλή πολικότητα + αφαίρεση θορύβου) αλλά σε πολύ
  * μικρότερη ανάλυση και ΧΩΡΙΣ να φτιάξει το τελικό canvas.
  *
- * @returns {{ok: boolean, kept: number, coverage: number}} kept = πόσα
- *   «character blobs» βρέθηκαν, coverage = πόσο πλάτος του crop καλύπτουν
- *   άκρη-σε-άκρη (0..1) — χρήσιμο για το hint απόστασης.
+ * @returns {{ok: boolean, kept: number, coverage: number, touchesEdge: boolean}}
+ *   kept = πόσα «character blobs» βρέθηκαν, coverage = πόσο πλάτος του crop
+ *   καλύπτουν άκρη-σε-άκρη (0..1), touchesEdge = κάποιος χαρακτήρας αγγίζει
+ *   την άκρη του crop (η πινακίδα ξεφεύγει από το πλαίσιο — πολύ κοντά,
+ *   ΟΧΙ μακριά, ανεξάρτητα από το πόσο «μικρή» δείχνει η coverage).
  */
 export function assessPlateAlignment(source, { targetWidth = 450 } = {}) {
   const { gray, w, h, threshold } = grayscaleAndThreshold(source, targetWidth);
   const darkOnLight = toBinary(gray, w, h, threshold, false);
   const lightOnDark = toBinary(gray, w, h, threshold, true);
   const best = pickPolarity(keepCharacterBlobs(darkOnLight), keepCharacterBlobs(lightOnDark));
-  return { ok: best.ok, kept: best.kept, coverage: best.coverage || 0 };
+  return {
+    ok: best.ok,
+    kept: best.kept,
+    coverage: best.coverage || 0,
+    touchesEdge: !!best.touchesEdge,
+  };
 }
 
 // Μια ελληνική πινακίδα έχει 6 (μηχανή) ή 7 (αυτοκίνητο) χαρακτήρες.
@@ -291,7 +298,16 @@ function keepCharacterBlobs(bin) {
   }
   const coverage = maxX >= minX ? (maxX - minX + 1) / w : 0;
 
-  return { bin: { data: out, w, h }, ok: true, kept, coverage };
+  // Αν κάποιος χαρακτήρας αγγίζει σχεδόν την άκρη του crop, το πλαίσιο-οδηγός
+  // ΚΟΒΕΙ την πινακίδα — υπάρχουν κι άλλοι χαρακτήρες ΕΞΩ από το κάδρο που
+  // δεν εντοπίζονται καν. Η coverage ΜΟΝΗ της παραπλανά εδώ: μπορεί να
+  // φαίνεται «μικρή» (λίγοι ορατοί χαρακτήρες, στριμωγμένοι σε μια άκρη) και
+  // να δείχνει λανθασμένα «πλησίασε», ενώ στην πραγματικότητα το πρόβλημα
+  // είναι ότι είναι ΗΔΗ πολύ κοντά. Το edge-touch flag έχει προτεραιότητα.
+  const EDGE_MARGIN = Math.max(2, Math.round(0.03 * w));
+  const touchesEdge = maxX >= minX && (minX <= EDGE_MARGIN || maxX >= w - 1 - EDGE_MARGIN);
+
+  return { bin: { data: out, w, h }, ok: true, kept, coverage, touchesEdge };
 }
 
 // --------------------------------------------------------------------
