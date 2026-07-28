@@ -1,0 +1,596 @@
+/* App.css — mobile-first στυλ για το Ψηφιακό Πελατολόγιο */
+
+:root {
+  --bg: #0f172a;
+  --panel: #1e293b;
+  --panel-2: #334155;
+  --text: #e2e8f0;
+  --muted: #94a3b8;
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --danger: #dc2626;
+  --border: #334155;
+  --radius: 12px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.app {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 0 12px 40px;
+}
+
+/* Topbar */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 4px;
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 10;
+}
+.brand {
+  font-weight: 700;
+  font-size: 1.15rem;
+}
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.btn-new-vehicle {
+  white-space: nowrap;
+}
+.health {
+  font-size: 0.8rem;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--panel-2);
+}
+.health-ok {
+  color: #4ade80;
+}
+.health-down {
+  color: #f87171;
+}
+
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+.tab {
+  flex: 1;
+  min-width: max-content;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+  border-radius: 999px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.tab-active {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+
+/* Content / cards */
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 8px;
+}
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+.card h2 {
+  margin: 0 0 6px;
+  font-size: 1.05rem;
+}
+.muted {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+.small {
+  font-size: 0.78rem;
+}
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* Fields */
+.field-label {
+  display: block;
+  margin: 12px 0 4px;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+.field-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.field-checkbox input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+}
+.input {
+  width: 100%;
+  margin-top: 6px;
+  padding: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  font-size: 1rem;
+}
+textarea.input {
+  resize: vertical;
+}
+
+/* Buttons */
+.btn {
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  border-radius: 10px;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.btn-primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--primary-hover);
+}
+.btn-danger {
+  background: transparent;
+  border-color: var(--danger);
+  color: #fca5a5;
+}
+.btn-ghost {
+  background: transparent;
+}
+.btn-block {
+  width: 100%;
+  margin-top: 14px;
+}
+.btn-sm {
+  padding: 8px 12px;
+  font-size: 0.82rem;
+}
+.btn-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+/* Key input row (Ρυθμίσεις) */
+.key-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  margin-top: 6px;
+}
+.key-row .input {
+  margin-top: 0;
+  flex: 1;
+}
+.key-row .btn {
+  white-space: nowrap;
+}
+
+/* OCR confidence */
+.ocr-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+}
+.ocr-conf {
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+/* Test connection */
+.test-conn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+.conn-ok {
+  color: #4ade80;
+  font-size: 0.9rem;
+}
+.conn-fail {
+  color: #f87171;
+  font-size: 0.9rem;
+}
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  display: inline-block;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Alerts */
+.alert {
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 0.88rem;
+  margin-top: 12px;
+}
+.alert-error {
+  background: rgba(220, 38, 38, 0.15);
+  border: 1px solid var(--danger);
+  color: #fecaca;
+}
+.alert-info {
+  background: rgba(37, 99, 235, 0.15);
+  border: 1px solid var(--primary);
+  color: #bfdbfe;
+}
+.banner {
+  margin: 10px 0 0;
+}
+
+/* Camera / QR */
+.camera-frame,
+.qr-region {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  background: #000;
+  border-radius: 10px;
+  overflow: hidden;
+  margin-top: 10px;
+}
+.camera-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.camera-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+}
+
+/* Επιλογή τύπου οχήματος — αλλάζει το σχήμα του πλαισίου-οδηγού */
+.mode-toggle {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.mode-btn {
+  flex: 1;
+  padding: 8px 10px;
+  font-size: 0.9rem;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.mode-btn.is-active {
+  color: #4ade80;
+  border-color: #4ade80;
+  background: rgba(74, 222, 128, 0.1);
+}
+.mode-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Επιφυλάξεις της ανάλυσης OCR */
+.ocr-warn {
+  margin-top: 8px;
+  padding: 8px 10px;
+  font-size: 0.82rem;
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  border-radius: 8px;
+}
+.ocr-warn ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+/* Πλαίσιο-οδηγός πλάκας (overlay).
+   Κόκκινο = δεν εντοπίστηκε ακόμα καθαρή πινακίδα (π.χ. πολύ κοντά -> θόλωμα).
+   Πράσινο (.is-aligned) = ζωντανό heuristic βρήκε 6-7 καθαρούς χαρακτήρες. */
+.plate-guide {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  border: 3px solid #f87171;
+  border-radius: 8px;
+  box-shadow: 0 0 0 2000px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  transition: border-color 0.15s ease;
+}
+.plate-guide.is-aligned {
+  border-color: #4ade80;
+}
+.plate-guide-label {
+  position: absolute;
+  top: -22px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.72rem;
+  color: #f87171;
+  background: rgba(0, 0, 0, 0.5);
+  padding: 1px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+  transition: color 0.15s ease;
+}
+.plate-guide.is-aligned .plate-guide-label {
+  color: #4ade80;
+}
+
+/* Preview προεπεξεργασμένης εικόνας */
+.ocr-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+}
+.ocr-preview img {
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+}
+#qr-reader-region video {
+  width: 100% !important;
+  object-fit: cover;
+}
+
+.raw-qr {
+  margin-top: 12px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.raw-qr code {
+  display: block;
+  margin-top: 6px;
+  word-break: break-all;
+  background: var(--bg);
+  padding: 8px;
+  border-radius: 8px;
+}
+
+/* Counters (Εγγραφές hub) */
+.counters {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0;
+}
+.counter {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  text-align: center;
+}
+.counter-num {
+  display: block;
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+.counter-lbl {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+/* Filter chips */
+.filters {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 10px 0;
+}
+.chip {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+  border-radius: 999px;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.chip-active {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+.entry-recon {
+  margin-top: 4px;
+}
+
+/* Lists */
+.list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.entries {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+.entry-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.entry-plate {
+  font-weight: 700;
+  font-family: ui-monospace, monospace;
+}
+.entry-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+}
+.entry-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.badge {
+  color: #fff;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+}
+
+/* Active entry key/value */
+.kv {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--border);
+  font-size: 0.9rem;
+}
+.kv span {
+  color: var(--muted);
+}
+
+/* Table */
+.table-wrap {
+  overflow-x: auto;
+}
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 10px;
+  font-size: 0.85rem;
+}
+.table th,
+.table td {
+  text-align: left;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.table th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+/* History */
+.history {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+.history-item {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.history-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+.history-head .mono {
+  font-weight: 700;
+}
+.history-body {
+  padding: 0 12px 12px;
+}
+.timeline {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0;
+  font-size: 0.85rem;
+}
+.timeline li {
+  padding: 4px 0;
+  border-bottom: 1px dashed var(--border);
+}
+.log-list {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0 0;
+  font-size: 0.82rem;
+}
+.log-list .ok {
+  color: #4ade80;
+}
+.log-list .fail {
+  color: #f87171;
+}

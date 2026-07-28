@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: dcl-backend
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    healthCheckPath: /api/health
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: dcl-db
+          property: connectionString
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: ADMIN_KEY
+        generateValue: true
+      - key: USE_MOCK_AADE
+        value: "true"
+      # Βάλε εδώ το πραγματικό origin του Vercel frontend μετά το πρώτο
+      # deploy (π.χ. https://dcl-frontend.vercel.app) — μέχρι τότε δεν
+      # μπλοκάρει τίποτα (Flask-CORS default "*" αν μείνει κενό).
+      - key: CORS_ORIGINS
+        sync: false
+
+databases:
+  - name: dcl-db
+    plan: free

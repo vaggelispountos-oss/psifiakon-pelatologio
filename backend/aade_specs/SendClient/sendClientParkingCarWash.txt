@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<dcrnew:NewDigitalClientDoc xsi:schemaLocation="http://www.aade.gr/myDATA/dcrnew/v1.0 SendClient-v1.0.xsd" xmlns:dcrnew="http://www.aade.gr/myDATA/dcrnew/v1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+	<dcrnew:newDigitalClient>
+		<dcrnew:clientServiceType>2</dcrnew:clientServiceType>
+		<dcrnew:branch>0</dcrnew:branch>
+		<dcrnew:comments>TEST_PARKINGCARWASH_CASE</dcrnew:comments>
+		<dcrnew:useCase>
+            <dcrnew:parkingcarwash>
+				<dcrnew:vehicleRegistrationNumber>TESTREGNUMBER</dcrnew:vehicleRegistrationNumber>
+				<dcrnew:vehicleCategory>TESTCATEGORY</dcrnew:vehicleCategory>
+				<dcrnew:vehicleFactory>TESTFACTORY</dcrnew:vehicleFactory>
+			</dcrnew:parkingcarwash>
+		</dcrnew:useCase>
+	</dcrnew:newDigitalClient>
+</dcrnew:NewDigitalClientDoc>
+

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<dcrudt:UpdateClientDoc xsi:schemaLocation="https://www.aade.gr/myDATA/dcrudt/v1.0 updateClient-v1.0.xsd" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:dcrudt="https://www.aade.gr/myDATA/dcrudt/v1.0">
+	<dcrudt:updateClient>
+		<dcrudt:initialDclId></dcrudt:initialDclId>
+		<dcrudt:clientServiceType>1</dcrudt:clientServiceType>
+        <dcrudt:entryCompletion>true</dcrudt:entryCompletion>
+		<dcrudt:amount>10</dcrudt:amount>
+		<dcrudt:comments>TEST UPDATE RENTAL CLIENT SERVICE</dcrudt:comments>
+	</dcrudt:updateClient>
+</dcrudt:UpdateClientDoc>

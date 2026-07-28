@@ -1,0 +1,3 @@
+# Dependencies μόνο για tests (mock του HTTP layer — καμία πραγματική κλήση ΑΑΔΕ)
+pytest>=8.0
+responses>=0.25
