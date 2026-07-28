@@ -128,7 +128,9 @@ body {
 
 /* Fields */
 .field-label {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   margin: 12px 0 4px;
   font-size: 0.88rem;
   color: var(--muted);
@@ -144,7 +146,6 @@ body {
 }
 .input {
   width: 100%;
-  margin-top: 6px;
   padding: 12px;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -539,6 +540,109 @@ textarea.input {
 .table th {
   color: var(--muted);
   font-weight: 600;
+}
+
+/* Login split-screen */
+.login-screen {
+  min-height: 100vh;
+  display: flex;
+}
+.login-visual {
+  position: relative;
+  flex: 1 1 50%;
+  display: none;
+  background: linear-gradient(160deg, #0b1220 0%, var(--bg) 55%, #111c34 100%);
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+}
+.login-visual::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgba(148, 163, 184, 0.12) 1px, transparent 1px);
+  background-size: 26px 26px;
+  opacity: 0.5;
+}
+.login-visual-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.login-visual::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 45%;
+  background: linear-gradient(to top, var(--bg) 5%, rgba(15, 23, 42, 0) 100%);
+  pointer-events: none;
+}
+.login-visual-caption {
+  position: absolute;
+  left: 40px;
+  bottom: 40px;
+  right: 40px;
+  color: var(--text);
+  z-index: 1;
+}
+.login-visual-caption h3 {
+  margin: 0 0 6px;
+  font-size: 1.35rem;
+  font-weight: 700;
+}
+.login-visual-caption p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+  max-width: 380px;
+}
+.login-form-panel {
+  flex: 1 1 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.login-card {
+  width: 100%;
+  max-width: 400px;
+}
+.login-brand-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 22px;
+}
+.login-brand-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.login-brand-icon svg {
+  width: 22px;
+  height: 22px;
+  stroke: #fff;
+}
+.login-brand-name {
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+.login-brand-sub {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+@media (min-width: 860px) {
+  .login-visual {
+    display: block;
+  }
 }
 
 /* History */
