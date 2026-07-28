@@ -201,6 +201,15 @@ textarea.input {
   margin-top: 12px;
   flex-wrap: wrap;
 }
+.btn-row-end {
+  justify-content: flex-end;
+}
+.btn-lg {
+  padding: 18px 28px;
+  font-size: 1.1rem;
+  min-height: 56px;
+  min-width: 220px;
+}
 
 /* Key input row (Ρυθμίσεις) */
 .key-row {

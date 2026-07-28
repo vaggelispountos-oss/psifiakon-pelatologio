@@ -295,22 +295,26 @@ export default function CameraCapture({ onConfirm, disabled }) {
         )}
       </div>
 
-      <div className="btn-row">
+      <div className="btn-row btn-row-end">
         {!cameraOn ? (
-          <button className="btn" onClick={startCamera} disabled={disabled}>
+          <button
+            className="btn btn-primary btn-lg"
+            onClick={startCamera}
+            disabled={disabled}
+          >
             📷 Άνοιγμα κάμερας
           </button>
         ) : (
           <>
+            <button className="btn btn-ghost" onClick={stopCamera}>
+              Κλείσιμο
+            </button>
             <button
-              className="btn"
+              className="btn btn-primary btn-lg"
               onClick={captureAndRecognize}
               disabled={ocrRunning}
             >
               {ocrRunning ? `Αναγνώριση… ${progress}%` : "🔍 Σκάναρε πινακίδα"}
-            </button>
-            <button className="btn btn-ghost" onClick={stopCamera}>
-              Κλείσιμο
             </button>
           </>
         )}
