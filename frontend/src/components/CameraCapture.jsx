@@ -111,9 +111,12 @@ export default function CameraCapture({ onConfirm, disabled }) {
   const [distanceHint, setDistanceHint] = useState(null);
   // Πόσα συνεχόμενα «πράσινα» περάσματα έχουμε δει — για auto-scan σταθερότητας.
   const stableAlignedTicksRef = useRef(0);
-  // true όσο ισχύει η τρέχουσα «ευθυγραμμισμένη περίοδος» — ώστε να μη
-  // ξανασκανάρει αυτόματα σε κάθε tick όσο ο χρήστης κρατά ακίνητο το όχημα.
-  const autoScannedRef = useRef(false);
+  // true ΜΟΛΙΣ βρεθεί έστω ΜΙΑ φορά πινακίδα (αυτόματα ή χειροκίνητα) —
+  // ΚΛΕΙΔΩΝΕΙ το auto-scan μέχρι να κλείσει/ξανανοίξει η κάμερα. Χωρίς αυτό,
+  // αν ο χρήστης μετακινήσει την κάμερα ΑΛΛΟΥ αφού βρει ήδη σωστά την πλάκα
+  // (π.χ. για να δείξει κάτι άλλο, ή απλά τρέμει το χέρι), κάθε νέα τυχαία
+  // ευθυγράμμιση θα ξανασκανάριζε και θα ΧΑΛΟΥΣΕ το ήδη σωστό πεδίο.
+  const scanLockedRef = useRef(false);
   // id της ΤΕΛΕΥΤΑΙΑΣ σάρωσης στο backend (OcrMetric) — για να ενημερώσουμε
   // αν τελικά ο χρήστης το διόρθωσε χειροκίνητα, όταν πατήσει «Δημιουργία».
   const lastMetricIdRef = useRef(null);
@@ -132,7 +135,7 @@ export default function CameraCapture({ onConfirm, disabled }) {
       setAligned(false);
       setDistanceHint(null);
       stableAlignedTicksRef.current = 0;
-      autoScannedRef.current = false;
+      scanLockedRef.current = false;
       return;
     }
     let cancelled = false;
@@ -176,18 +179,19 @@ export default function CameraCapture({ onConfirm, disabled }) {
 
         // Auto-scan: μόλις μείνει σταθερά ευθυγραμμισμένη για λίγα tick,
         // σκανάρει μόνη της — ο χρήστης δεν χρειάζεται να ξαναπατήσει τίποτα.
+        // ΔΕΝ ξανασκανάρει αν είναι ήδη κλειδωμένο (βρέθηκε πινακίδα νωρίτερα
+        // σε αυτή τη συνεδρία κάμερας) — αλλιώς μια τυχαία ευθυγράμμιση ενώ ο
+        // χρήστης κουνάει την κάμερα αλλού θα χαλούσε το ήδη σωστό πεδίο.
         if (isAligned) {
           stableAlignedTicksRef.current += 1;
           if (
             stableAlignedTicksRef.current >= AUTO_SCAN_STABLE_TICKS &&
-            !autoScannedRef.current
+            !scanLockedRef.current
           ) {
-            autoScannedRef.current = true;
             captureAndRecognize();
           }
         } else {
           stableAlignedTicksRef.current = 0;
-          autoScannedRef.current = false;
         }
       } finally {
         busy = false;
@@ -305,6 +309,10 @@ export default function CameraCapture({ onConfirm, disabled }) {
 
       if (result.plate) {
         setPlate(result.plate);
+        // Κλείδωσε το auto-scan — βρέθηκε πινακίδα, μην την ξαναπειράξεις αν
+        // η κάμερα μετακινηθεί αλλού. Ο χρήστης μπορεί πάντα να πατήσει
+        // χειροκίνητα «Σκάναρε» για να ξαναδοκιμάσει.
+        scanLockedRef.current = true;
       } else {
         setPlate("");
         setError(
