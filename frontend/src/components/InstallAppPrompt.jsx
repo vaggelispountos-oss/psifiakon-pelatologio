@@ -1,18 +1,18 @@
 // components/InstallAppPrompt.jsx
 // --------------------------------------------------------------------
-// Banner που καθοδηγεί τον χρήστη να «κατεβάσει» (εγκαταστήσει) την
-// εφαρμογή από τον browser στην αρχική οθόνη του κινητού.
+// Σταθερό κουμπί (όχι αυτόματο popup/banner) που ο χρήστης πατάει όποτε
+// θέλει για να εγκαταστήσει την εφαρμογή στην αρχική οθόνη του κινητού.
 //
-// - Android/Chrome: πιάνει το native `beforeinstallprompt` event και
-//   δείχνει κουμπί που ανοίγει το πραγματικό install dialog.
-// - iOS Safari: ΔΕΝ υποστηρίζει beforeinstallprompt, οπότε δείχνουμε
-//   γραπτές οδηγίες «Κοινοποίηση -> Προσθήκη στην Αρχική Οθόνη».
-// - Κρύβεται αυτόματα αν η εφαρμογή τρέχει ήδη ως PWA (standalone) ή
-//   αν ο χρήστης το έχει κλείσει.
+// - Android/Chrome: πιάνει το native `beforeinstallprompt` event και το
+//   κουμπί ανοίγει το πραγματικό install dialog. Αν το event δεν έχει
+//   ακόμα έρθει (ή έχει λήξει), δείχνει οδηγίες μέσω του μενού ⋮.
+// - iOS Safari: ΔΕΝ υποστηρίζει beforeinstallprompt, οπότε το κουμπί
+//   δείχνει πάντα γραπτές οδηγίες «Κοινοποίηση -> Προσθήκη στην Αρχική
+//   Οθόνη».
+// - Εξαφανίζεται μόνο αν η εφαρμογή τρέχει ήδη ως εγκατεστημένο PWA
+//   (standalone) — δεν «κλείνει» μόνιμα σαν popup.
 // --------------------------------------------------------------------
 import { useEffect, useState } from "react";
-
-const DISMISS_KEY = "dcl_install_prompt_dismissed";
 
 function isStandalone() {
   return (
@@ -27,77 +27,64 @@ function isIOS() {
 
 export default function InstallAppPrompt() {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
-  const [visible, setVisible] = useState(false);
-  const [showIosSteps, setShowIosSteps] = useState(false);
-  const [showManualSteps, setShowManualSteps] = useState(false);
+  const [standalone, setStandalone] = useState(isStandalone);
+  const [showSteps, setShowSteps] = useState(false);
 
   useEffect(() => {
-    if (isStandalone() || localStorage.getItem(DISMISS_KEY) === "1") return;
-
-    if (isIOS()) {
-      setVisible(true);
-      return;
-    }
+    if (isIOS() || standalone) return;
 
     function onBeforeInstallPrompt(e) {
       e.preventDefault();
       setDeferredPrompt(e);
-      setVisible(true);
     }
     window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
-    return () =>
-      window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
-  }, []);
 
-  function dismiss() {
-    setVisible(false);
-    setShowIosSteps(false);
-    localStorage.setItem(DISMISS_KEY, "1");
-  }
+    function onAppInstalled() {
+      setStandalone(true);
+    }
+    window.addEventListener("appinstalled", onAppInstalled);
+
+    return () => {
+      window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+      window.removeEventListener("appinstalled", onAppInstalled);
+    };
+  }, [standalone]);
 
   async function handleInstallClick() {
     if (isIOS()) {
-      setShowIosSteps((v) => !v);
+      setShowSteps((v) => !v);
       return;
     }
-    // Το deferredPrompt μπορεί να έχει ήδη ακυρωθεί από τον browser (π.χ.
-    // πέρασε πολλή ώρα από το beforeinstallprompt) — τότε δείξε το
-    // χειροκίνητο μονοπάτι μέσω του μενού ⋮ αντί να μην κάνουμε τίποτα.
+    // Το deferredPrompt μπορεί να μην έχει έρθει ακόμα, ή να έχει ήδη
+    // ακυρωθεί από τον browser — τότε δείξε το χειροκίνητο μονοπάτι μέσω
+    // του μενού ⋮ αντί να μην κάνουμε τίποτα.
     if (!deferredPrompt) {
-      setShowManualSteps((v) => !v);
+      setShowSteps((v) => !v);
       return;
     }
     try {
       deferredPrompt.prompt();
       await deferredPrompt.userChoice;
       setDeferredPrompt(null);
-      setVisible(false);
+      setShowSteps(false);
     } catch {
-      setShowManualSteps(true);
+      setShowSteps(true);
     }
   }
 
-  if (!visible) return null;
+  if (standalone) return null;
 
   return (
-    <div className="install-prompt">
-      <div className="install-prompt-row">
-        <span className="install-prompt-icon">📲</span>
-        <div className="install-prompt-text">
-          <b>Εγκατάσταση εφαρμογής στο κινητό</b>
-          <span className="muted">
-            Πρόσβαση σαν κανονική εφαρμογή, χωρίς browser γύρω-γύρω.
-          </span>
-        </div>
-        <button className="btn btn-primary btn-sm" onClick={handleInstallClick}>
-          Εγκατάσταση
-        </button>
-        <button className="btn btn-ghost btn-sm" onClick={dismiss} aria-label="Κλείσιμο">
-          ✕
-        </button>
-      </div>
+    <div className="install-inline">
+      <button
+        type="button"
+        className="btn btn-ghost btn-sm install-inline-btn"
+        onClick={handleInstallClick}
+      >
+        📲 Εγκατάσταση εφαρμογής
+      </button>
 
-      {showIosSteps && (
+      {showSteps && isIOS() && (
         <ol className="install-prompt-steps">
           <li>
             Πάτησε το εικονίδιο <b>Κοινοποίηση</b> (τετράγωνο με βέλος προς τα πάνω) στη
@@ -110,7 +97,7 @@ export default function InstallAppPrompt() {
         </ol>
       )}
 
-      {showManualSteps && (
+      {showSteps && !isIOS() && (
         <ol className="install-prompt-steps">
           <li>
             Πάτησε το μενού <b>⋮</b> πάνω δεξιά στο Chrome.

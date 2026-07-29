@@ -30,7 +30,6 @@ import HistoryLog from "./components/HistoryLog";
 import OcrStats from "./components/OcrStats";
 import { SettingsAccordion } from "./components/SettingsPanel";
 import Login from "./components/Login";
-import InstallAppPrompt from "./components/InstallAppPrompt";
 
 // Τα 3 πρώτα tabs δείχνουν όλα την ΙΔΙΑ λίστα εγγραφών, απλά ομαδοποιημένη
 // διαφορετικά — το `hint` εξηγεί ΤΙ διαφορετικό δείχνει το καθένα, γιατί
@@ -121,25 +120,17 @@ export default function App() {
   const isAuthenticated = authChecked && !!getToken() && !!workshop;
 
   if (!isAuthenticated) {
-    return (
-      <>
-        <InstallAppPrompt />
-        <Login onAuthenticated={(w) => setWorkshop(w)} />
-      </>
-    );
+    return <Login onAuthenticated={(w) => setWorkshop(w)} />;
   }
 
   return (
-    <>
-      <InstallAppPrompt />
-      <AuthenticatedApp
-        workshop={workshop}
-        onLogout={() => {
-          logout();
-          setWorkshop(null);
-        }}
-      />
-    </>
+    <AuthenticatedApp
+      workshop={workshop}
+      onLogout={() => {
+        logout();
+        setWorkshop(null);
+      }}
+    />
   );
 }
 

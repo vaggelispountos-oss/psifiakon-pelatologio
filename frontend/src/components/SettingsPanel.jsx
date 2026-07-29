@@ -9,6 +9,7 @@ import { getSettings, updateSettings, testConnection } from "../services/api";
 import Accordion from "./Accordion";
 import HelpKnowledgeBase from "./HelpKnowledgeBase";
 import ContactSupport from "./ContactSupport";
+import InstallAppPrompt from "./InstallAppPrompt";
 
 export default function SettingsPanel({ onSaved }) {
   const [username, setUsername] = useState("");
@@ -224,6 +225,19 @@ export function SettingsAccordion({ onSaved }) {
       sections={[
         { id: "kb", title: "Οδηγός Σφαλμάτων — Τι κάνω αν δω…", render: () => <HelpKnowledgeBase /> },
         { id: "contact", title: "Επικοινωνία", render: () => <ContactSupport /> },
+        {
+          id: "install",
+          title: "Εγκατάσταση στο κινητό",
+          render: () => (
+            <div>
+              <p className="muted" style={{ marginTop: 0 }}>
+                Πρόσθεσε την εφαρμογή στην αρχική οθόνη του κινητού σου για
+                πρόσβαση σαν κανονική εφαρμογή.
+              </p>
+              <InstallAppPrompt />
+            </div>
+          ),
+        },
         { id: "aade", title: "Ρυθμίσεις ΑΑΔΕ", render: () => <SettingsPanel onSaved={onSaved} /> },
       ]}
     />

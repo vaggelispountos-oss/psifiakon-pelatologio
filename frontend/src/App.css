@@ -849,38 +849,24 @@ textarea.input {
   padding: 0 18px 16px;
 }
 
-/* Install app banner */
-.install-prompt {
-  max-width: 560px;
-  margin: 0 auto;
-  padding: 10px 12px;
-  background: var(--panel);
-  border-bottom: 1px solid var(--border);
-}
-.install-prompt-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.install-prompt-icon {
-  font-size: 1.4rem;
-  line-height: 1;
-}
-.install-prompt-text {
+/* Install app — σταθερό κουμπί, όχι popup */
+.install-inline {
   display: flex;
   flex-direction: column;
-  flex: 1;
-  min-width: 0;
-  font-size: 0.88rem;
+  align-items: flex-start;
+  gap: 4px;
 }
-.install-prompt-text .muted {
-  font-size: 0.78rem;
+.install-inline-btn {
+  white-space: nowrap;
 }
 .install-prompt-steps {
-  margin: 10px 0 0;
-  padding-left: 20px;
+  margin: 6px 0 0;
+  padding: 10px 12px 10px 28px;
   font-size: 0.85rem;
   color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
 }
 .install-prompt-steps li {
   margin-bottom: 4px;
