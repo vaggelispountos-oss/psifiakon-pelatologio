@@ -29,6 +29,7 @@ export default function InstallAppPrompt() {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [visible, setVisible] = useState(false);
   const [showIosSteps, setShowIosSteps] = useState(false);
+  const [showManualSteps, setShowManualSteps] = useState(false);
 
   useEffect(() => {
     if (isStandalone() || localStorage.getItem(DISMISS_KEY) === "1") return;
@@ -59,11 +60,21 @@ export default function InstallAppPrompt() {
       setShowIosSteps((v) => !v);
       return;
     }
-    if (!deferredPrompt) return;
-    deferredPrompt.prompt();
-    await deferredPrompt.userChoice;
-    setDeferredPrompt(null);
-    setVisible(false);
+    // Το deferredPrompt μπορεί να έχει ήδη ακυρωθεί από τον browser (π.χ.
+    // πέρασε πολλή ώρα από το beforeinstallprompt) — τότε δείξε το
+    // χειροκίνητο μονοπάτι μέσω του μενού ⋮ αντί να μην κάνουμε τίποτα.
+    if (!deferredPrompt) {
+      setShowManualSteps((v) => !v);
+      return;
+    }
+    try {
+      deferredPrompt.prompt();
+      await deferredPrompt.userChoice;
+      setDeferredPrompt(null);
+      setVisible(false);
+    } catch {
+      setShowManualSteps(true);
+    }
   }
 
   if (!visible) return null;
@@ -96,6 +107,17 @@ export default function InstallAppPrompt() {
             Επίλεξε <b>«Προσθήκη στην Αρχική Οθόνη»</b> (Add to Home Screen).
           </li>
           <li>Πάτησε <b>«Προσθήκη»</b> πάνω δεξιά.</li>
+        </ol>
+      )}
+
+      {showManualSteps && (
+        <ol className="install-prompt-steps">
+          <li>
+            Πάτησε το μενού <b>⋮</b> πάνω δεξιά στο Chrome.
+          </li>
+          <li>
+            Επίλεξε <b>«Εγκατάσταση εφαρμογής»</b> (ή «Προσθήκη στην αρχική οθόνη»).
+          </li>
         </ol>
       )}
     </div>
