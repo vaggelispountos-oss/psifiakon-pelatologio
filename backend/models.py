@@ -144,6 +144,26 @@ class DclEntry(db.Model):
         cascade="all, delete-orphan",
     )
 
+    @property
+    def pending_action(self):
+        """
+        Ποιος «Χρόνος» έχει αποθηκευτεί τοπικά αλλά ΔΕΝ έχει επιβεβαιωθεί
+        ακόμη από την ΑΑΔΕ (π.χ. λόγω διακοπής internet κατά την αποστολή).
+        None -> τίποτα εκκρεμές, όλα όσα έχουν γίνει είναι επιβεβαιωμένα.
+        Χρησιμοποιείται από το frontend για να δείξει κουμπί «Επαναποστολή».
+        """
+        if self.status == "cancelled":
+            return None
+        if self.id_dcl is None:
+            return "entry"
+        if self.status == "open" and self.provided_service_category is not None:
+            return "service"
+        if self.status == "in_progress" and self.invoice_kind is not None and not self.entry_completion:
+            return "exit"
+        if self.status == "completed" and self.mark is not None and self.correlate_id is None:
+            return "correlate"
+        return None
+
     def to_dict(self, include_logs=False):
         data = {
             "id": self.id,
@@ -165,6 +185,7 @@ class DclEntry(db.Model):
             "mark": self.mark,
             "correlateId": self.correlate_id,
             "status": self.status,
+            "pendingAction": self.pending_action,
             "comments": self.comments,
             "createdAt": self.created_at.isoformat() if self.created_at else None,
             "updatedAt": self.updated_at.isoformat() if self.updated_at else None,

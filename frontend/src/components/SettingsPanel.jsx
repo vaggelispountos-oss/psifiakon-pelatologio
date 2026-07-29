@@ -6,6 +6,9 @@
 // --------------------------------------------------------------------
 import { useEffect, useState } from "react";
 import { getSettings, updateSettings, testConnection } from "../services/api";
+import Accordion from "./Accordion";
+import HelpKnowledgeBase from "./HelpKnowledgeBase";
+import ContactSupport from "./ContactSupport";
 
 export default function SettingsPanel({ onSaved }) {
   const [username, setUsername] = useState("");
@@ -84,9 +87,7 @@ export default function SettingsPanel({ onSaved }) {
   const hasKey = status?.has_key;
 
   return (
-    <div className="card">
-      <h2>Ρυθμίσεις ΑΑΔΕ</h2>
-
+    <div className="settings-form">
       <div className="alert alert-info">
         <b>Πώς βρίσκω τους κωδικούς:</b> Σύνδεση στο myDATA με τους κωδικούς
         TAXISnet → «Εγγραφή στο myDATA REST API» → δημιουργείς <b>Όνομα Χρήστη</b>{" "}
@@ -210,5 +211,21 @@ export default function SettingsPanel({ onSaved }) {
         </>
       )}
     </div>
+  );
+}
+
+// Accordion με ΟΛΗ την οθόνη Ρυθμίσεων — μόνο μία ενότητα ανοιχτή τη φορά
+// ώστε να μην πιάνουν πολύ χώρο οι κάρτες. Σειρά (ζητήθηκε ρητά):
+// Οδηγός Σφαλμάτων πάνω-πάνω, Ρυθμίσεις ΑΑΔΕ κάτω-κάτω.
+export function SettingsAccordion({ onSaved }) {
+  return (
+    <Accordion
+      defaultOpen="kb"
+      sections={[
+        { id: "kb", title: "Οδηγός Σφαλμάτων — Τι κάνω αν δω…", render: () => <HelpKnowledgeBase /> },
+        { id: "contact", title: "Επικοινωνία", render: () => <ContactSupport /> },
+        { id: "aade", title: "Ρυθμίσεις ΑΑΔΕ", render: () => <SettingsPanel onSaved={onSaved} /> },
+      ]}
+    />
   );
 }

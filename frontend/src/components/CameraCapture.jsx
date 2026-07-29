@@ -313,7 +313,11 @@ export default function CameraCapture({ onConfirm, disabled }) {
         );
       }
     } catch (err) {
-      setError("Σφάλμα OCR: " + err.message);
+      setError(
+        "Σφάλμα OCR: " +
+          err.message +
+          " — δοκίμασε ξανά τη λήψη ή πληκτρολόγησε την πινακίδα χειροκίνητα."
+      );
     } finally {
       setOcrRunning(false);
     }

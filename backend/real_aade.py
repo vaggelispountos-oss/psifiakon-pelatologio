@@ -135,7 +135,7 @@ class RealAadeService:
             return {"error": "Σφάλμα αιτήματος προς ΑΑΔΕ (400): %s"
                              % (resp.text or "")[:300]}
         if resp.status_code != 200:
-            return {"error": "Τεχνικό σφάλμα ΑΑΔΕ (HTTP %d)." % resp.status_code}
+            return {"error": "Τεχνικό σφάλμα ΑΑΔΕ (HTTP %d). Δοκίμασε ξανά σε λίγο· αν επιμένει, επικοινώνησε με την υποστήριξη." % resp.status_code}
         # HTTP 200 -> τα ΕΠΙΧΕΙΡΗΣΙΑΚΑ σφάλματα κρύβονται ΜΕΣΑ στο XML
         return self._parse_response(resp.content)
 
@@ -156,7 +156,7 @@ class RealAadeService:
             except (requests.ConnectionError, requests.Timeout) as exc:
                 last_exc = exc
                 continue
-        return {"error": "Δικτυακό σφάλμα επικοινωνίας με ΑΑΔΕ: %s" % last_exc}
+        return {"error": "Δικτυακό σφάλμα επικοινωνίας με ΑΑΔΕ: %s — έλεγξε τη σύνδεση internet και δοκίμασε ξανά." % last_exc}
 
     def _get(self, path, params=None):
         url = "%s/%s" % (self.base_url, path)
@@ -169,12 +169,12 @@ class RealAadeService:
                 if resp.status_code == 401:
                     return {"error": "Λάθος κωδικοί ΑΑΔΕ (401)."}
                 if resp.status_code != 200:
-                    return {"error": "Τεχνικό σφάλμα ΑΑΔΕ (HTTP %d)." % resp.status_code}
+                    return {"error": "Τεχνικό σφάλμα ΑΑΔΕ (HTTP %d). Δοκίμασε ξανά σε λίγο· αν επιμένει, επικοινώνησε με την υποστήριξη." % resp.status_code}
                 return {"raw_xml": resp.text, "content": resp.content}
             except (requests.ConnectionError, requests.Timeout) as exc:
                 last_exc = exc
                 continue
-        return {"error": "Δικτυακό σφάλμα επικοινωνίας με ΑΑΔΕ: %s" % last_exc}
+        return {"error": "Δικτυακό σφάλμα επικοινωνίας με ΑΑΔΕ: %s — έλεγξε τη σύνδεση internet και δοκίμασε ξανά." % last_exc}
 
     # ================================================================
     # XSD validation

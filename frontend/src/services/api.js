@@ -94,7 +94,7 @@ async function request(path, { method = "GET", body, skipAuth = false } = {}) {
   if (!response.ok) {
     const message =
       (data && data.error) ||
-      `Σφάλμα διακομιστή (HTTP ${response.status}).`;
+      `Σφάλμα διακομιστή (HTTP ${response.status}). Δοκίμασε ξανά σε λίγο· αν επιμένει, ελέγξε τα logs του backend.`;
     throw new Error(message);
   }
 
@@ -156,6 +156,12 @@ export function testConnection() {
 // Reconciliation — σύγκριση τοπικής εγγραφής με την ΑΑΔΕ
 export function reconcileEntry(entry_id) {
   return request(`/api/dcl/reconcile/${entry_id}`);
+}
+
+// Επαναποστολή — η εγγραφή είναι αποθηκευμένη αλλά ο τελευταίος Χρόνος δεν
+// επιβεβαιώθηκε από την ΑΑΔΕ (π.χ. έπεσε το internet).
+export function resendEntry(entry_id) {
+  return request(`/api/dcl/entries/${entry_id}/resend`, { method: "POST" });
 }
 
 // ---- 1ος Χρόνος — SendClient ----

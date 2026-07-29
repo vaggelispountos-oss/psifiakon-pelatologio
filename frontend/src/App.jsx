@@ -28,8 +28,9 @@ import EntriesList from "./components/EntriesList";
 import CustomerDatabase from "./components/CustomerDatabase";
 import HistoryLog from "./components/HistoryLog";
 import OcrStats from "./components/OcrStats";
-import SettingsPanel from "./components/SettingsPanel";
+import { SettingsAccordion } from "./components/SettingsPanel";
 import Login from "./components/Login";
+import InstallAppPrompt from "./components/InstallAppPrompt";
 
 // Τα 3 πρώτα tabs δείχνουν όλα την ΙΔΙΑ λίστα εγγραφών, απλά ομαδοποιημένη
 // διαφορετικά — το `hint` εξηγεί ΤΙ διαφορετικό δείχνει το καθένα, γιατί
@@ -120,17 +121,25 @@ export default function App() {
   const isAuthenticated = authChecked && !!getToken() && !!workshop;
 
   if (!isAuthenticated) {
-    return <Login onAuthenticated={(w) => setWorkshop(w)} />;
+    return (
+      <>
+        <InstallAppPrompt />
+        <Login onAuthenticated={(w) => setWorkshop(w)} />
+      </>
+    );
   }
 
   return (
-    <AuthenticatedApp
-      workshop={workshop}
-      onLogout={() => {
-        logout();
-        setWorkshop(null);
-      }}
-    />
+    <>
+      <InstallAppPrompt />
+      <AuthenticatedApp
+        workshop={workshop}
+        onLogout={() => {
+          logout();
+          setWorkshop(null);
+        }}
+      />
+    </>
   );
 }
 
@@ -497,9 +506,7 @@ function AuthenticatedApp({ workshop, onLogout }) {
         )}
         {tab === "ocr-stats" && <OcrStats />}
         {tab === "settings" && (
-          <SettingsPanel
-            onSaved={(s) => setHasKey(!!s.has_key)}
-          />
+          <SettingsAccordion onSaved={(s) => setHasKey(!!s.has_key)} />
         )}
       </main>
     </div>

@@ -426,7 +426,7 @@ def register_routes(app):
         if "error" in result:
             _log_aade(entry.id, "SendClient", aade_payload, result, False)
             db.session.commit()
-            raise ApiError(f"ΑΑΔΕ SendClient error: {result['error']}", 502)
+            raise ApiError(f"ΑΑΔΕ SendClient error: {result['error']} — έλεγξε τα στοιχεία ΑΑΔΕ στις Ρυθμίσεις ή δοκίμασε ξανά σε λίγο.", 502)
 
         # Αποθήκευση απάντησης ΑΑΔΕ
         entry.id_dcl = result["idDcl"]
@@ -471,11 +471,14 @@ def register_routes(app):
                 "είναι υποχρεωτικό."
             )
 
+        # Αποθηκεύουμε ΠΑΝΤΑ τα δεδομένα (χρήσιμα για επαναποστολή αν αποτύχει
+        # η κλήση), αλλά η κατάσταση ("in_progress") προχωράει ΜΟΝΟ μετά από
+        # επιβεβαιωμένη επιτυχία — αλλιώς θα δείχναμε "εντάξει" κάτι που στην
+        # πραγματικότητα δεν έφτασε ποτέ στην ΑΑΔΕ.
         entry.provided_service_category = category
         entry.provided_service_category_other = other
         if data.get("comments"):
             entry.comments = data.get("comments")
-        entry.status = "in_progress"
 
         # Κλήση ΑΑΔΕ (mock) — 2ος Χρόνος
         aade_payload = {
@@ -487,8 +490,9 @@ def register_routes(app):
         if "error" in result:
             _log_aade(entry.id, "UpdateClient", aade_payload, result, False)
             db.session.commit()
-            raise ApiError(f"ΑΑΔΕ UpdateClient error: {result['error']}", 502)
+            raise ApiError(f"ΑΑΔΕ UpdateClient error: {result['error']} — έλεγξε τα στοιχεία ΑΑΔΕ στις Ρυθμίσεις ή δοκίμασε ξανά σε λίγο.", 502)
 
+        entry.status = "in_progress"
         _log_aade(entry.id, "UpdateClient", aade_payload, result, True)
         db.session.commit()
 
@@ -520,8 +524,7 @@ def register_routes(app):
         if invoice_kind is not None:
             entry.invoice_kind = _parse_int(invoice_kind, "invoiceKind")
 
-        entry.entry_completion = True
-        entry.status = "completed"
+        # entry_completion/status προχωράνε ΜΟΝΟ μετά από επιβεβαιωμένη επιτυχία.
 
         # Κλήση ΑΑΔΕ — 3ος Χρόνος (UpdateClient με entryCompletion).
         # ⚠️ Για Συνεργεία το providedServiceCategory είναι ΥΠΟΧΡΕΩΤΙΚΟ σε ΚΑΘΕ
@@ -543,9 +546,11 @@ def register_routes(app):
         if "error" in result:
             _log_aade(entry.id, "UpdateClient", aade_payload, result, False)
             db.session.commit()
-            raise ApiError(f"ΑΑΔΕ UpdateClient error: {result['error']}", 502)
+            raise ApiError(f"ΑΑΔΕ UpdateClient error: {result['error']} — έλεγξε τα στοιχεία ΑΑΔΕ στις Ρυθμίσεις ή δοκίμασε ξανά σε λίγο.", 502)
 
         # Η ΑΑΔΕ βάζει το completionDateTime
+        entry.entry_completion = True
+        entry.status = "completed"
         entry.completion_date_time = utcnow()
         _log_aade(entry.id, "UpdateClient", aade_payload, result, True)
         db.session.commit()
@@ -573,7 +578,7 @@ def register_routes(app):
             raise ApiError("Το πεδίο 'mark' (ΜΑΡΚ παραστατικού) είναι υποχρεωτικό.")
 
         entry.mark = str(mark)
-        entry.status = "correlated"
+        # status προχωράει σε "correlated" ΜΟΝΟ μετά από επιβεβαιωμένη επιτυχία.
 
         # Κλήση ΑΑΔΕ (mock) — 4ος Χρόνος
         aade_payload = {"mark": str(mark)}
@@ -582,9 +587,10 @@ def register_routes(app):
         if "error" in result:
             _log_aade(entry.id, "ClientCorrelations", aade_payload, result, False)
             db.session.commit()
-            raise ApiError(f"ΑΑΔΕ ClientCorrelations error: {result['error']}", 502)
+            raise ApiError(f"ΑΑΔΕ ClientCorrelations error: {result['error']} — έλεγξε τα στοιχεία ΑΑΔΕ στις Ρυθμίσεις ή δοκίμασε ξανά σε λίγο.", 502)
 
         entry.correlate_id = result["correlateId"]
+        entry.status = "correlated"
         _log_aade(entry.id, "ClientCorrelations", aade_payload, result, True)
         db.session.commit()
 
@@ -606,7 +612,7 @@ def register_routes(app):
         if "error" in result:
             _log_aade(entry.id, "CancelClient", {}, result, False)
             db.session.commit()
-            raise ApiError(f"ΑΑΔΕ CancelClient error: {result['error']}", 502)
+            raise ApiError(f"ΑΑΔΕ CancelClient error: {result['error']} — έλεγξε τα στοιχεία ΑΑΔΕ στις Ρυθμίσεις ή δοκίμασε ξανά σε λίγο.", 502)
 
         entry.status = "cancelled"
         _log_aade(entry.id, "CancelClient", {}, result, True)
@@ -805,6 +811,80 @@ def register_routes(app):
         return jsonify(data)
 
     # ----------------------------------------------------------------
+    # Επαναποστολή — η εγγραφή είναι αποθηκευμένη τοπικά αλλά ο τελευταίος
+    # «Χρόνος» δεν επιβεβαιώθηκε από την ΑΑΔΕ (π.χ. έπεσε το internet στη
+    # μέση). Ξαναστέλνει ΑΚΡΙΒΩΣ την ίδια, ήδη αποθηκευμένη πληροφορία.
+    # ----------------------------------------------------------------
+    @app.route("/api/dcl/entries/<int:entry_id>/resend", methods=["POST"])
+    @require_auth
+    def resend_entry(entry_id):
+        entry = _get_entry_or_404(entry_id)
+        action = entry.pending_action
+        if action is None:
+            raise ApiError("Δεν υπάρχει κάτι εκκρεμές προς επαναποστολή για αυτή την εγγραφή.")
+
+        settings = _require_credentials()
+        aade = _build_aade(settings)
+
+        if action == "entry":
+            aade_payload = {
+                "vehicleRegistrationNumber": entry.plate,
+                "branch": entry.branch,
+                "clientServiceType": entry.client_service_type,
+                "serviceType": entry.service_type,
+            }
+            if settings.entity_vat_number:
+                aade_payload["entityVatNumber"] = settings.entity_vat_number
+            result = aade.send_client(aade_payload)
+            method = "SendClient"
+        elif action == "service":
+            aade_payload = {
+                "providedServiceCategory": entry.provided_service_category,
+                "providedServiceCategoryOther": entry.provided_service_category_other,
+            }
+            result = aade.update_client(entry.id_dcl, aade_payload)
+            method = "UpdateClient"
+        elif action == "exit":
+            aade_payload = {
+                "entryCompletion": True,
+                "providedServiceCategory": entry.provided_service_category,
+                "providedServiceCategoryOther": entry.provided_service_category_other,
+                "invoiceKind": entry.invoice_kind,
+            }
+            result = aade.update_client(entry.id_dcl, aade_payload)
+            method = "UpdateClient"
+        else:  # "correlate"
+            aade_payload = {"mark": entry.mark}
+            result = aade.client_correlations(entry.id_dcl, aade_payload)
+            method = "ClientCorrelations"
+
+        if "error" in result:
+            _log_aade(entry.id, method, aade_payload, result, False)
+            db.session.commit()
+            raise ApiError(
+                f"Η επαναποστολή απέτυχε — {result['error']} "
+                "Η εγγραφή παραμένει αποθηκευμένη τοπικά, δοκίμασε ξανά αργότερα.",
+                502,
+            )
+
+        if action == "entry":
+            entry.id_dcl = result["idDcl"]
+            entry.creation_date_time = utcnow()
+        elif action == "service":
+            entry.status = "in_progress"
+        elif action == "exit":
+            entry.entry_completion = True
+            entry.status = "completed"
+            entry.completion_date_time = utcnow()
+        else:
+            entry.correlate_id = result["correlateId"]
+            entry.status = "correlated"
+
+        _log_aade(entry.id, method, aade_payload, result, True)
+        db.session.commit()
+        return jsonify(entry.to_dict())
+
+    # ----------------------------------------------------------------
     # Reconciliation — σύγκριση τοπικής εγγραφής με την ΑΑΔΕ (RequestClients)
     # ----------------------------------------------------------------
     @app.route("/api/dcl/reconcile/<int:entry_id>", methods=["GET"])
@@ -901,16 +981,16 @@ def register_error_handlers(app):
 
     @app.errorhandler(404)
     def handle_404(err):
-        return jsonify({"error": "Το endpoint δεν βρέθηκε."}), 404
+        return jsonify({"error": "Το endpoint δεν βρέθηκε. Έλεγξε ότι το backend έχει ενημερωθεί στην τελευταία έκδοση."}), 404
 
     @app.errorhandler(405)
     def handle_405(err):
-        return jsonify({"error": "Μη επιτρεπτή μέθοδος HTTP."}), 405
+        return jsonify({"error": "Μη επιτρεπτή μέθοδος HTTP. Πιθανό πρόβλημα συμβατότητας frontend/backend."}), 405
 
     @app.errorhandler(500)
     def handle_500(err):
         db.session.rollback()
-        return jsonify({"error": "Εσωτερικό σφάλμα διακομιστή."}), 500
+        return jsonify({"error": "Εσωτερικό σφάλμα διακομιστή. Δοκίμασε ξανά· αν επιμένει, ελέγξε τα logs του backend."}), 500
 
 
 app = create_app()
