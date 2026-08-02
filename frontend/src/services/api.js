@@ -102,10 +102,10 @@ async function request(path, { method = "GET", body, skipAuth = false } = {}) {
 }
 
 // ---- Auth ----
-export async function register({ name, email, password }) {
+export async function register({ name, email, password, businessType }) {
   const data = await request("/api/auth/register", {
     method: "POST",
-    body: { name, email, password },
+    body: { name, email, password, businessType },
     skipAuth: true,
   });
   setSession(data.accessToken, data.workshop);
@@ -166,6 +166,8 @@ export function resendEntry(entry_id) {
 
 // ---- 1ος Χρόνος — SendClient ----
 // Το branch έρχεται πλέον ΑΠΟ ΤΙΣ ΡΥΘΜΙΣΕΙΣ στο backend (όχι από εδώ).
+// vehicleMovementPurpose/isDiffVehPickupLocation/vehiclePickupLocation:
+// ΜΟΝΟ για Ενοικιάσεις (αγνοούνται από το backend για Συνεργεία).
 export function createEntry({
   plate,
   customerName,
@@ -173,6 +175,9 @@ export function createEntry({
   vehicleCategory,
   vehicleFactory,
   comments,
+  vehicleMovementPurpose,
+  isDiffVehPickupLocation,
+  vehiclePickupLocation,
 }) {
   return request("/api/dcl/entry", {
     method: "POST",
@@ -183,6 +188,9 @@ export function createEntry({
       vehicleCategory,
       vehicleFactory,
       comments,
+      vehicleMovementPurpose,
+      isDiffVehPickupLocation,
+      vehiclePickupLocation,
     },
   });
 }
@@ -206,10 +214,25 @@ export function addService({
 }
 
 // ---- 3ος Χρόνος — UpdateClient (entryCompletion) ----
-export function completeExit({ entry_id, invoiceKind, reasonNonIssueType }) {
+// amount/isDiffVehReturnLocation/vehicleReturnLocation: ΜΟΝΟ για Ενοικιάσεις.
+export function completeExit({
+  entry_id,
+  invoiceKind,
+  reasonNonIssueType,
+  amount,
+  isDiffVehReturnLocation,
+  vehicleReturnLocation,
+}) {
   return request("/api/dcl/exit", {
     method: "POST",
-    body: { entry_id, invoiceKind, reasonNonIssueType },
+    body: {
+      entry_id,
+      invoiceKind,
+      reasonNonIssueType,
+      amount,
+      isDiffVehReturnLocation,
+      vehicleReturnLocation,
+    },
   });
 }
 

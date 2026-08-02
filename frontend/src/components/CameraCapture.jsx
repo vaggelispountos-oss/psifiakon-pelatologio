@@ -9,6 +9,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getRecognizer, recognizerName } from "../services/plateRecognizer";
 import { logOcrAttempt, confirmOcrMetric } from "../services/api";
+import { VEHICLE_MOVEMENT_PURPOSES } from "../constants";
 // Ελαφρύ heuristic (χωρίς OCR) για ζωντανό feedback ευθυγράμμισης — δουλεύει
 // πάνω στο ίδιο pipeline denoising ανεξάρτητα από το ποιος recognizer είναι
 // ενεργός (Tesseract ή μελλοντικό ALPR), γι' αυτό εισάγεται απευθείας.
@@ -88,12 +89,16 @@ function computeCropRect(video, frame, mode) {
   return { sx, sy, sw, sh };
 }
 
-export default function CameraCapture({ onConfirm, disabled }) {
+export default function CameraCapture({ onConfirm, disabled, isRental }) {
   const videoRef = useRef(null);
   const frameRef = useRef(null);
   const streamRef = useRef(null);
 
   const [mode, setMode] = useState("car");
+  // Ενοικιάσεις — υποχρεωτικά/προαιρετικά πεδία του 1ου Χρόνου (rental useCase)
+  const [movementPurpose, setMovementPurpose] = useState("");
+  const [diffPickupLocation, setDiffPickupLocation] = useState(false);
+  const [pickupLocation, setPickupLocation] = useState("");
   const [cameraOn, setCameraOn] = useState(false);
   const [ocrRunning, setOcrRunning] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -337,13 +342,28 @@ export default function CameraCapture({ onConfirm, disabled }) {
       setError("Συμπλήρωσε πινακίδα πριν τη δημιουργία εγγραφής.");
       return;
     }
+    if (isRental && !movementPurpose) {
+      setError("Επίλεξε Σκοπό Κίνησης Οχήματος.");
+      return;
+    }
+    if (isRental && diffPickupLocation && !pickupLocation.trim()) {
+      setError("Συμπλήρωσε τον τόπο παραλαβής.");
+      return;
+    }
     // Αν είχε προηγηθεί σάρωση, ενημέρωσε τη μετρική με το ΤΕΛΙΚΟ κείμενο,
     // ώστε το backend να υπολογίσει αν χρειάστηκε χειροκίνητη διόρθωση.
     if (lastMetricIdRef.current) {
       confirmOcrMetric(lastMetricIdRef.current, value).catch(() => {});
     }
     stopCamera();
-    onConfirm(value);
+    const extra = isRental
+      ? {
+          vehicleMovementPurpose: Number(movementPurpose),
+          isDiffVehPickupLocation: diffPickupLocation,
+          vehiclePickupLocation: diffPickupLocation ? pickupLocation.trim() : null,
+        }
+      : {};
+    onConfirm(value, extra);
   }
 
   // 100% βεβαιότητα ΚΑΙ καμία επιφύλαξη parser -> σίγουρη ανάγνωση, όχι απλά
@@ -353,7 +373,7 @@ export default function CameraCapture({ onConfirm, disabled }) {
 
   return (
     <div className="card">
-      <h2>1ος Χρόνος — Είσοδος οχήματος</h2>
+      <h2>1ος Χρόνος — {isRental ? "Παραλαβή οχήματος" : "Είσοδος οχήματος"}</h2>
       <p className="muted">
         Διάλεξε τύπο οχήματος και ευθυγράμμισε την πλάκα μέσα στο πλαίσιο· θα
         γίνει ΠΡΑΣΙΝΟ όταν φαίνεται καθαρά και σκανάρει μόνη της. Ακολούθησε
@@ -447,6 +467,48 @@ export default function CameraCapture({ onConfirm, disabled }) {
           onChange={(e) => setPlate(e.target.value)}
         />
       </label>
+
+      {isRental && (
+        <>
+          <label className="field-label">
+            Σκοπός Κίνησης Οχήματος:
+            <select
+              className="input"
+              value={movementPurpose}
+              onChange={(e) => setMovementPurpose(e.target.value)}
+            >
+              <option value="">— Επίλεξε —</option>
+              {VEHICLE_MOVEMENT_PURPOSES.map((p) => (
+                <option key={p.value} value={p.value}>
+                  {p.value} — {p.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="field-label field-checkbox">
+            <input
+              type="checkbox"
+              checked={diffPickupLocation}
+              onChange={(e) => setDiffPickupLocation(e.target.checked)}
+            />
+            Διαφορετικός τόπος παραλαβής οχήματος
+          </label>
+
+          {diffPickupLocation && (
+            <label className="field-label">
+              Τόπος Παραλαβής:
+              <input
+                className="input"
+                type="text"
+                value={pickupLocation}
+                onChange={(e) => setPickupLocation(e.target.value)}
+                placeholder="π.χ. Αεροδρόμιο Ηρακλείου"
+              />
+            </label>
+          )}
+        </>
+      )}
 
       {/* Βεβαιότητα OCR */}
       {confidence !== null && (

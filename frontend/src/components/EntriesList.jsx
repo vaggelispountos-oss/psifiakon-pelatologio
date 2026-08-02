@@ -5,14 +5,19 @@
 // αναφέρεται ρητά στο entry_id του. Δεν υπάρχει «τρέχον όχημα» global state.
 // --------------------------------------------------------------------
 import { useMemo, useState } from "react";
-import { STATUS_LABELS } from "../constants";
+import { STATUS_LABELS, STATUS_LABELS_RENTAL } from "../constants";
 import { reconcileEntry } from "../services/api";
 
-// Επόμενο βήμα ανά status
+// Επόμενο βήμα ανά status. Ενοικιάσεις δεν έχουν 2ο Χρόνο — από "open" πάνε
+// κατευθείαν σε Ολοκλήρωση.
 const NEXT_ACTION = {
   open: { label: "Πρόσθεσε εργασία", stage: "service" },
   in_progress: { label: "Ολοκλήρωση", stage: "exit" },
   completed: { label: "Σκάναρε ΜΑΡΚ", stage: "correlate" },
+};
+const NEXT_ACTION_RENTAL = {
+  ...NEXT_ACTION,
+  open: { label: "Ολοκλήρωση", stage: "exit" },
 };
 
 // Φίλτρα σταδίων
@@ -24,8 +29,9 @@ const FILTERS = [
   { id: "correlated", label: "Ολοκληρωμένα" },
 ];
 
-function StatusBadge({ status }) {
-  const s = STATUS_LABELS[status] || { text: status, color: "#6b7280" };
+function StatusBadge({ status, isRental }) {
+  const labels = isRental ? STATUS_LABELS_RENTAL : STATUS_LABELS;
+  const s = labels[status] || { text: status, color: "#6b7280" };
   return (
     <span className="badge" style={{ backgroundColor: s.color }}>
       {s.text}
@@ -39,7 +45,9 @@ export default function EntriesList({
   onAct,
   onRefresh,
   onNewVehicle,
+  isRental,
 }) {
+  const nextActionMap = isRental ? NEXT_ACTION_RENTAL : NEXT_ACTION;
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [recon, setRecon] = useState({}); // {entryId: {loading, result}}
@@ -157,13 +165,13 @@ export default function EntriesList({
 
       <div className="entries">
         {filtered.map((e) => {
-          const next = NEXT_ACTION[e.status];
+          const next = nextActionMap[e.status];
           return (
             <div key={e.id} className="entry-row">
               <div className="entry-main">
                 <div className="entry-plate">{e.plate}</div>
                 <div className="entry-meta">
-                  <StatusBadge status={e.status} />
+                  <StatusBadge status={e.status} isRental={isRental} />
                   <span className="mono">{e.idDcl || "—"}</span>
                 </div>
                 <div className="entry-recon">{reconLine(e)}</div>

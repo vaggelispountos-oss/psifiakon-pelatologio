@@ -281,7 +281,9 @@ class RealAadeService:
     # ================================================================
     def _build_send_client_xml(self, data):
         """
-        1ος Χρόνος — NewDigitalClientDoc > newDigitalClient (garage/Συνεργεία).
+        1ος Χρόνος — NewDigitalClientDoc > newDigitalClient.
+        useCase: "garage" (Συνεργεία, clientServiceType=3) ή "rental"
+        (Ενοικιάσεις, clientServiceType=1) — δες data["useCase"].
         Σειρά πεδίων ΑΚΡΙΒΩΣ κατά το XSD (xs:sequence).
         """
         root = etree.Element(
@@ -289,7 +291,7 @@ class RealAadeService:
         )
         nc = _el(root, NS_NEW, "newDigitalClient")
 
-        # clientServiceType (3 = Συνεργεία)
+        # clientServiceType (1 = Ενοικιάσεις, 3 = Συνεργεία)
         _el(nc, NS_NEW, "clientServiceType", data.get("clientServiceType", 3))
 
         # creationDateTime: ΜΟΝΟ αν transmissionFailure=1 (αλλιώς το βάζει η ΑΑΔΕ)
@@ -317,16 +319,34 @@ class RealAadeService:
         if comments:
             _el(nc, NS_NEW, "comments", str(comments)[:150])
 
-        # useCase > garage (GarageType)
+        # useCase > garage (GarageType) ή rental (RentalType)
         uc = _el(nc, NS_NEW, "useCase")
-        garage = _el(uc, NS_NEW, "garage")
-        if data.get("vehicleRegistrationNumber"):
-            _el(garage, NS_NEW, "vehicleRegistrationNumber",
-                str(data["vehicleRegistrationNumber"])[:50])
-        if data.get("vehicleCategory"):
-            _el(garage, NS_NEW, "vehicleCategory", str(data["vehicleCategory"])[:100])
-        if data.get("vehicleFactory"):
-            _el(garage, NS_NEW, "vehicleFactory", str(data["vehicleFactory"])[:100])
+        if data.get("useCase") == "rental":
+            rental = _el(uc, NS_NEW, "rental")
+            if data.get("vehicleRegistrationNumber"):
+                _el(rental, NS_NEW, "vehicleRegistrationNumber",
+                    str(data["vehicleRegistrationNumber"])[:50])
+            if data.get("vehicleCategory"):
+                _el(rental, NS_NEW, "vehicleCategory", str(data["vehicleCategory"])[:100])
+            if data.get("vehicleFactory"):
+                _el(rental, NS_NEW, "vehicleFactory", str(data["vehicleFactory"])[:100])
+            if data.get("vehicleMovementPurpose") is not None:
+                _el(rental, NS_NEW, "vehicleMovementPurpose",
+                    int(data["vehicleMovementPurpose"]))
+            if data.get("isDiffVehPickupLocation"):
+                _el(rental, NS_NEW, "isDiffVehPickupLocation", "true")
+                if data.get("vehiclePickupLocation"):
+                    _el(rental, NS_NEW, "vehiclePickupLocation",
+                        str(data["vehiclePickupLocation"])[:250])
+        else:
+            garage = _el(uc, NS_NEW, "garage")
+            if data.get("vehicleRegistrationNumber"):
+                _el(garage, NS_NEW, "vehicleRegistrationNumber",
+                    str(data["vehicleRegistrationNumber"])[:50])
+            if data.get("vehicleCategory"):
+                _el(garage, NS_NEW, "vehicleCategory", str(data["vehicleCategory"])[:100])
+            if data.get("vehicleFactory"):
+                _el(garage, NS_NEW, "vehicleFactory", str(data["vehicleFactory"])[:100])
 
         return root
 
@@ -353,6 +373,18 @@ class RealAadeService:
         # nonIssueInvoice (όταν δεν εκδίδεται παραστατικό)
         if data.get("nonIssueInvoice") is True:
             _el(uc, NS_UPD, "nonIssueInvoice", "true")
+
+        # amount [Ενοικιάσεις — Συμφωνηθέν Ποσό] (θέση κατά XSD: πριν το
+        # completionDateTime, που δεν το στέλνουμε ποτέ — το βάζει η ΑΑΔΕ)
+        if data.get("amount") is not None:
+            _el(uc, NS_UPD, "amount", "%.2f" % float(data["amount"]))
+
+        # isDiffVehReturnLocation / vehicleReturnLocation [Ενοικιάσεις]
+        if data.get("isDiffVehReturnLocation"):
+            _el(uc, NS_UPD, "isDiffVehReturnLocation", "true")
+            if data.get("vehicleReturnLocation"):
+                _el(uc, NS_UPD, "vehicleReturnLocation",
+                    str(data["vehicleReturnLocation"])[:250])
 
         # providedServiceCategory [ΥΠΟΧΡΕΩΤΙΚΟ για Συνεργεία — κάθε φορά]
         cat = data.get("providedServiceCategory")

@@ -25,7 +25,7 @@ from sqlalchemy import inspect, text
 
 from auth import init_auth, require_auth
 from config import Config
-from models import AadeLog, Customer, DclEntry, OcrMetric, Settings, db, utcnow
+from models import AadeLog, Customer, DclEntry, OcrMetric, Settings, Workshop, db, utcnow
 
 # --------------------------------------------------------------------
 # Επιλογή υπηρεσίας ΑΑΔΕ (mock ή πραγματική).
@@ -155,6 +155,12 @@ def _normalize_plate(plate):
     if not plate:
         return ""
     return re.sub(r"[^A-Z0-9Α-Ω]", "", plate.upper())
+
+
+def _get_workshop():
+    """Το Workshop του τρέχοντος tenant — καθορίζει τον τύπο επιχείρησης
+    (Συνεργείο/Ενοικίαση) άρα και ποιο clientServiceType/ροή χρησιμοποιείται."""
+    return Workshop.query.get(g.workshop_id)
 
 
 def _get_settings():
@@ -366,6 +372,8 @@ def register_routes(app):
         # Guard: πρέπει να έχουν οριστεί credentials ΑΑΔΕ
         settings = _require_credentials()
         aade = _build_aade(settings)
+        workshop = _get_workshop()
+        is_rental = workshop.client_service_type == 1
 
         plate = (data.get("plate") or "").strip()
         # Το branch έρχεται ΑΠΟ ΤΙΣ ΡΥΘΜΙΣΕΙΣ (όχι hardcoded/από το body)
@@ -373,6 +381,20 @@ def register_routes(app):
 
         if not plate:
             raise ApiError("Το πεδίο 'plate' (πινακίδα) είναι υποχρεωτικό.")
+
+        # --- Ενοικιάσεις: Σκοπός Κίνησης Οχήματος υποχρεωτικός στον 1ο Χρόνο ---
+        movement_purpose = None
+        is_diff_pickup = None
+        pickup_location = None
+        if is_rental:
+            movement_purpose = data.get("vehicleMovementPurpose")
+            if movement_purpose is None:
+                raise ApiError("Το πεδίο 'vehicleMovementPurpose' (Σκοπός Κίνησης) είναι υποχρεωτικό για Ενοικιάσεις.")
+            movement_purpose = _parse_int(movement_purpose, "vehicleMovementPurpose")
+            if movement_purpose not in (1, 2, 3):
+                raise ApiError("Το 'vehicleMovementPurpose' πρέπει να είναι 1, 2 ή 3.")
+            is_diff_pickup = bool(data.get("isDiffVehPickupLocation"))
+            pickup_location = (data.get("vehiclePickupLocation") or "").strip() or None
 
         # Δημιουργία ή εύρεση πελάτη με βάση την πινακίδα (μέσα στο workshop)
         customer = Customer.query.filter_by(
@@ -404,8 +426,12 @@ def register_routes(app):
             workshop_id=g.workshop_id,
             plate=plate,
             branch=int(branch),
+            client_service_type=workshop.client_service_type,
             comments=data.get("comments"),
             status="open",
+            vehicle_movement_purpose=movement_purpose,
+            is_diff_pickup_location=is_diff_pickup,
+            vehicle_pickup_location=pickup_location,
         )
         db.session.add(entry)
         db.session.flush()  # για να πάρουμε entry.id για το log
@@ -418,7 +444,14 @@ def register_routes(app):
             "branch": int(branch),
             "clientServiceType": entry.client_service_type,
             "serviceType": entry.service_type,
+            "useCase": "rental" if is_rental else "garage",
+            "vehicleCategory": data.get("vehicleCategory"),
+            "vehicleFactory": data.get("vehicleFactory"),
         }
+        if is_rental:
+            aade_payload["vehicleMovementPurpose"] = movement_purpose
+            aade_payload["isDiffVehPickupLocation"] = is_diff_pickup
+            aade_payload["vehiclePickupLocation"] = pickup_location
         if settings.entity_vat_number:
             aade_payload["entityVatNumber"] = settings.entity_vat_number
         result = aade.send_client(aade_payload)
@@ -455,6 +488,8 @@ def register_routes(app):
         data = request.get_json(silent=True) or {}
 
         entry = _get_entry_or_404(data.get("entry_id"))
+        if entry.client_service_type == 1:
+            raise ApiError("Οι Ενοικιάσεις δεν έχουν 2ο Χρόνο (κατηγορία υπηρεσίας) — προχώρα κατευθείαν στην Ολοκλήρωση.")
         aade = _build_aade(_require_credentials())
 
         category = data.get("providedServiceCategory")
@@ -511,6 +546,7 @@ def register_routes(app):
 
         entry = _get_entry_or_404(data.get("entry_id"))
         aade = _build_aade(_require_credentials())
+        is_rental = entry.client_service_type == 1
 
         invoice_kind = data.get("invoiceKind")
         reason_non_issue = data.get("reasonNonIssueType")
@@ -524,17 +560,36 @@ def register_routes(app):
         if invoice_kind is not None:
             entry.invoice_kind = _parse_int(invoice_kind, "invoiceKind")
 
+        # --- Ενοικιάσεις: Συμφωνηθέν Ποσό + (προαιρετικά) τόπος επιστροφής ---
+        if is_rental:
+            amount = data.get("amount")
+            if amount is None:
+                raise ApiError("Το πεδίο 'amount' (Συμφωνηθέν Ποσό) είναι υποχρεωτικό για Ενοικιάσεις.")
+            try:
+                entry.amount = float(amount)
+            except (TypeError, ValueError):
+                raise ApiError("Το πεδίο 'amount' πρέπει να είναι αριθμός.")
+            entry.is_diff_return_location = bool(data.get("isDiffVehReturnLocation"))
+            entry.vehicle_return_location = (data.get("vehicleReturnLocation") or "").strip() or None
+
         # entry_completion/status προχωράνε ΜΟΝΟ μετά από επιβεβαιωμένη επιτυχία.
 
         # Κλήση ΑΑΔΕ — 3ος Χρόνος (UpdateClient με entryCompletion).
         # ⚠️ Για Συνεργεία το providedServiceCategory είναι ΥΠΟΧΡΕΩΤΙΚΟ σε ΚΑΘΕ
         # UpdateClient — το ξαναστέλνουμε από την εγγραφή (μπήκε στον 2ο Χρόνο).
+        # Για Ενοικιάσεις δεν υπάρχει providedServiceCategory — αντ' αυτού
+        # amount + (προαιρετικά) τόπος επιστροφής.
         aade_payload = {
             "entryCompletion": True,
-            "providedServiceCategory": entry.provided_service_category,
-            "providedServiceCategoryOther": entry.provided_service_category_other,
             "invoiceKind": entry.invoice_kind,
         }
+        if is_rental:
+            aade_payload["amount"] = entry.amount
+            aade_payload["isDiffVehReturnLocation"] = entry.is_diff_return_location
+            aade_payload["vehicleReturnLocation"] = entry.vehicle_return_location
+        else:
+            aade_payload["providedServiceCategory"] = entry.provided_service_category
+            aade_payload["providedServiceCategoryOther"] = entry.provided_service_category_other
         if reason_non_issue is not None:
             aade_payload["reasonNonIssueType"] = _parse_int(
                 reason_non_issue, "reasonNonIssueType"
@@ -827,12 +882,18 @@ def register_routes(app):
         aade = _build_aade(settings)
 
         if action == "entry":
+            is_rental = entry.client_service_type == 1
             aade_payload = {
                 "vehicleRegistrationNumber": entry.plate,
                 "branch": entry.branch,
                 "clientServiceType": entry.client_service_type,
                 "serviceType": entry.service_type,
+                "useCase": "rental" if is_rental else "garage",
             }
+            if is_rental:
+                aade_payload["vehicleMovementPurpose"] = entry.vehicle_movement_purpose
+                aade_payload["isDiffVehPickupLocation"] = entry.is_diff_pickup_location
+                aade_payload["vehiclePickupLocation"] = entry.vehicle_pickup_location
             if settings.entity_vat_number:
                 aade_payload["entityVatNumber"] = settings.entity_vat_number
             result = aade.send_client(aade_payload)
@@ -847,10 +908,15 @@ def register_routes(app):
         elif action == "exit":
             aade_payload = {
                 "entryCompletion": True,
-                "providedServiceCategory": entry.provided_service_category,
-                "providedServiceCategoryOther": entry.provided_service_category_other,
                 "invoiceKind": entry.invoice_kind,
             }
+            if entry.client_service_type == 1:
+                aade_payload["amount"] = entry.amount
+                aade_payload["isDiffVehReturnLocation"] = entry.is_diff_return_location
+                aade_payload["vehicleReturnLocation"] = entry.vehicle_return_location
+            else:
+                aade_payload["providedServiceCategory"] = entry.provided_service_category
+                aade_payload["providedServiceCategoryOther"] = entry.provided_service_category_other
             result = aade.update_client(entry.id_dcl, aade_payload)
             method = "UpdateClient"
         else:  # "correlate"

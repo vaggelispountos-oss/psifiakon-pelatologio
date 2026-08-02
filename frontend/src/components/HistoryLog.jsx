@@ -3,7 +3,12 @@
 // Κλικ σε εγγραφή -> φόρτωση των AadeLogs (audit) από το backend.
 import { useState } from "react";
 import { getEntry, resendEntry } from "../services/api";
-import { STATUS_LABELS, serviceCategoryLabel, invoiceKindLabel } from "../constants";
+import {
+  STATUS_LABELS,
+  STATUS_LABELS_RENTAL,
+  serviceCategoryLabel,
+  invoiceKindLabel,
+} from "../constants";
 
 function fmt(iso) {
   if (!iso) return "—";
@@ -93,7 +98,8 @@ export default function HistoryLog({ entries, loading, onRefresh }) {
 
       <div className="history">
         {sorted.map((e) => {
-          const s = STATUS_LABELS[e.status] || { text: e.status };
+          const labels = e.clientServiceType === 1 ? STATUS_LABELS_RENTAL : STATUS_LABELS;
+          const s = labels[e.status] || { text: e.status };
           return (
             <div key={e.id} className="history-item">
               <button className="history-head" onClick={() => toggle(e.id)}>
@@ -131,41 +137,74 @@ export default function HistoryLog({ entries, loading, onRefresh }) {
                         </div>
                       )}
 
-                      <ul className="timeline">
-                        <li>
-                          <StepMark ok={!!detail.idDcl} />{" "}
-                          <b>1ος Χρόνος:</b> idDcl {detail.idDcl || "—"} ·{" "}
-                          {fmt(detail.creationDateTime)}
-                        </li>
-                        <li>
-                          <StepMark
-                            ok={
-                              !!detail.providedServiceCategory &&
-                              detail.pendingAction !== "service"
-                            }
-                          />{" "}
-                          <b>2ος Χρόνος:</b>{" "}
-                          {detail.providedServiceCategory
-                            ? serviceCategoryLabel(detail.providedServiceCategory)
-                            : "—"}
-                        </li>
-                        <li>
-                          <StepMark ok={!!detail.completionDateTime} />{" "}
-                          <b>3ος Χρόνος:</b>{" "}
-                          {detail.completionDateTime
-                            ? `${invoiceKindLabel(detail.invoiceKind)} · ${fmt(
-                                detail.completionDateTime
-                              )}`
-                            : "—"}
-                        </li>
-                        <li>
-                          <StepMark ok={!!detail.correlateId} />{" "}
-                          <b>4ος Χρόνος:</b> ΜΑΡΚ {detail.mark || "—"}
-                          {detail.correlateId
-                            ? ` · correlateId ${detail.correlateId}`
-                            : ""}
-                        </li>
-                      </ul>
+                      {detail.clientServiceType === 1 ? (
+                        // Ενοικιάσεις — 3 Χρόνοι (χωρίς κατηγορία υπηρεσίας)
+                        <ul className="timeline">
+                          <li>
+                            <StepMark ok={!!detail.idDcl} />{" "}
+                            <b>1ος Χρόνος:</b> idDcl {detail.idDcl || "—"} ·{" "}
+                            {fmt(detail.creationDateTime)}
+                            {detail.vehiclePickupLocation
+                              ? ` · παραλαβή: ${detail.vehiclePickupLocation}`
+                              : ""}
+                          </li>
+                          <li>
+                            <StepMark ok={!!detail.completionDateTime} />{" "}
+                            <b>2ος Χρόνος (Ολοκλήρωση):</b>{" "}
+                            {detail.completionDateTime
+                              ? `${invoiceKindLabel(detail.invoiceKind)} · ${
+                                  detail.amount != null ? `${detail.amount}€ · ` : ""
+                                }${fmt(detail.completionDateTime)}`
+                              : "—"}
+                            {detail.vehicleReturnLocation
+                              ? ` · επιστροφή: ${detail.vehicleReturnLocation}`
+                              : ""}
+                          </li>
+                          <li>
+                            <StepMark ok={!!detail.correlateId} />{" "}
+                            <b>3ος Χρόνος:</b> ΜΑΡΚ {detail.mark || "—"}
+                            {detail.correlateId
+                              ? ` · correlateId ${detail.correlateId}`
+                              : ""}
+                          </li>
+                        </ul>
+                      ) : (
+                        <ul className="timeline">
+                          <li>
+                            <StepMark ok={!!detail.idDcl} />{" "}
+                            <b>1ος Χρόνος:</b> idDcl {detail.idDcl || "—"} ·{" "}
+                            {fmt(detail.creationDateTime)}
+                          </li>
+                          <li>
+                            <StepMark
+                              ok={
+                                !!detail.providedServiceCategory &&
+                                detail.pendingAction !== "service"
+                              }
+                            />{" "}
+                            <b>2ος Χρόνος:</b>{" "}
+                            {detail.providedServiceCategory
+                              ? serviceCategoryLabel(detail.providedServiceCategory)
+                              : "—"}
+                          </li>
+                          <li>
+                            <StepMark ok={!!detail.completionDateTime} />{" "}
+                            <b>3ος Χρόνος:</b>{" "}
+                            {detail.completionDateTime
+                              ? `${invoiceKindLabel(detail.invoiceKind)} · ${fmt(
+                                  detail.completionDateTime
+                                )}`
+                              : "—"}
+                          </li>
+                          <li>
+                            <StepMark ok={!!detail.correlateId} />{" "}
+                            <b>4ος Χρόνος:</b> ΜΑΡΚ {detail.mark || "—"}
+                            {detail.correlateId
+                              ? ` · correlateId ${detail.correlateId}`
+                              : ""}
+                          </li>
+                        </ul>
+                      )}
 
                       <details className="raw-qr">
                         <summary>

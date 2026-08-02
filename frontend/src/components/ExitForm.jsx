@@ -5,22 +5,42 @@
 import { useState } from "react";
 import { INVOICE_KINDS, REASON_NON_ISSUE_TYPES } from "../constants";
 
-export default function ExitForm({ onSubmit, disabled }) {
+export default function ExitForm({ onSubmit, disabled, isRental }) {
   const [noInvoice, setNoInvoice] = useState(false);
   const [invoiceKind, setInvoiceKind] = useState("");
   const [reasonNonIssueType, setReasonNonIssueType] = useState("");
+  const [amount, setAmount] = useState("");
+  const [diffReturnLocation, setDiffReturnLocation] = useState(false);
+  const [returnLocation, setReturnLocation] = useState("");
   const [error, setError] = useState("");
 
   function handleSubmit(e) {
     e.preventDefault();
     setError("");
 
+    if (isRental && !amount.trim()) {
+      setError("Το Συμφωνηθέν Ποσό είναι υποχρεωτικό.");
+      return;
+    }
+    if (isRental && diffReturnLocation && !returnLocation.trim()) {
+      setError("Συμπλήρωσε τον τόπο επιστροφής.");
+      return;
+    }
+
+    const rentalExtra = isRental
+      ? {
+          amount: Number(amount),
+          isDiffVehReturnLocation: diffReturnLocation,
+          vehicleReturnLocation: diffReturnLocation ? returnLocation.trim() : null,
+        }
+      : {};
+
     if (noInvoice) {
       if (!reasonNonIssueType) {
         setError("Επίλεξε αιτιολογία μη έκδοσης παραστατικού.");
         return;
       }
-      onSubmit({ reasonNonIssueType: Number(reasonNonIssueType) });
+      onSubmit({ reasonNonIssueType: Number(reasonNonIssueType), ...rentalExtra });
       return;
     }
 
@@ -29,16 +49,57 @@ export default function ExitForm({ onSubmit, disabled }) {
       return;
     }
 
-    onSubmit({ invoiceKind: Number(invoiceKind) });
+    onSubmit({ invoiceKind: Number(invoiceKind), ...rentalExtra });
   }
 
   return (
     <form className="card" onSubmit={handleSubmit}>
-      <h2>3ος Χρόνος — Ολοκλήρωση</h2>
+      <h2>{isRental ? "2ος Χρόνος — Ολοκλήρωση Ενοικίασης" : "3ος Χρόνος — Ολοκλήρωση"}</h2>
       <p className="muted">
-        Επίλεξε το είδος παραστατικού και ολοκλήρωσε την εργασία. Η ΑΑΔΕ
-        επιστρέφει την ώρα ολοκλήρωσης.
+        {isRental
+          ? "Συμπλήρωσε το συμφωνηθέν ποσό και το είδος παραστατικού για να ολοκληρωθεί η ενοικίαση."
+          : "Επίλεξε το είδος παραστατικού και ολοκλήρωσε την εργασία."}{" "}
+        Η ΑΑΔΕ επιστρέφει την ώρα ολοκλήρωσης.
       </p>
+
+      {isRental && (
+        <>
+          <label className="field-label">
+            Συμφωνηθέν Ποσό (€):
+            <input
+              className="input"
+              type="number"
+              min="0"
+              step="0.01"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="π.χ. 45.00"
+            />
+          </label>
+
+          <label className="field-label field-checkbox">
+            <input
+              type="checkbox"
+              checked={diffReturnLocation}
+              onChange={(e) => setDiffReturnLocation(e.target.checked)}
+            />
+            Διαφορετικός τόπος επιστροφής οχήματος
+          </label>
+
+          {diffReturnLocation && (
+            <label className="field-label">
+              Τόπος Επιστροφής:
+              <input
+                className="input"
+                type="text"
+                value={returnLocation}
+                onChange={(e) => setReturnLocation(e.target.value)}
+                placeholder="π.χ. Αεροδρόμιο Ηρακλείου"
+              />
+            </label>
+          )}
+        </>
+      )}
 
       <label className="field-label field-checkbox">
         <input

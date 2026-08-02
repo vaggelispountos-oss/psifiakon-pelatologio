@@ -5,24 +5,30 @@
 // --------------------------------------------------------------------
 import { useState } from "react";
 import { login, register } from "../services/api";
+import { BUSINESS_TYPES } from "../constants";
 
 export default function Login({ onAuthenticated }) {
   const [mode, setMode] = useState("login"); // login | register
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [businessType, setBusinessType] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
   async function handleSubmit(e) {
     e.preventDefault();
     setError(null);
+    if (mode === "register" && !businessType) {
+      setError("Επίλεξε τι είδους επιχείρηση είσαι.");
+      return;
+    }
     setBusy(true);
     try {
       const data =
         mode === "login"
           ? await login({ email, password })
-          : await register({ name, email, password });
+          : await register({ name, email, password, businessType });
       onAuthenticated(data.workshop);
     } catch (err) {
       setError(err.message);
@@ -163,16 +169,37 @@ export default function Login({ onAuthenticated }) {
 
           <form onSubmit={handleSubmit}>
             {mode === "register" && (
-              <label className="field-label">
-                Όνομα συνεργείου:
-                <input
-                  type="text"
-                  className="input"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required
-                />
-              </label>
+              <>
+                <div className="field-label">
+                  Τι είδους επιχείρηση είσαι;
+                  <div className="business-type-picker">
+                    {BUSINESS_TYPES.map((bt) => (
+                      <button
+                        key={bt.value}
+                        type="button"
+                        className={`business-type-card${
+                          businessType === bt.value ? " is-selected" : ""
+                        }`}
+                        onClick={() => setBusinessType(bt.value)}
+                      >
+                        <span className="business-type-icon">{bt.icon}</span>
+                        <span className="business-type-label">{bt.label}</span>
+                        <span className="business-type-desc">{bt.description}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <label className="field-label">
+                  Όνομα επιχείρησης:
+                  <input
+                    type="text"
+                    className="input"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    required
+                  />
+                </label>
+              </>
             )}
             <label className="field-label">
               Email:

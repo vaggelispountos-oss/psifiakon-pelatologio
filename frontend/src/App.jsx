@@ -19,7 +19,7 @@ import {
   logout,
   setUnauthorizedHandler,
 } from "./services/api";
-import { STATUS_LABELS } from "./constants";
+import { STATUS_LABELS, STATUS_LABELS_RENTAL } from "./constants";
 import CameraCapture from "./components/CameraCapture";
 import ServiceForm from "./components/ServiceForm";
 import ExitForm from "./components/ExitForm";
@@ -135,6 +135,7 @@ export default function App() {
 }
 
 function AuthenticatedApp({ workshop, onLogout }) {
+  const isRental = workshop?.businessType === "rental";
   const [tab, setTab] = useState("flow");
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -225,10 +226,10 @@ function AuthenticatedApp({ workshop, onLogout }) {
   }, [refresh, refreshSettings]);
 
   // ---- 1ος Χρόνος ----
-  async function handleCreateEntry(plate) {
+  async function handleCreateEntry(plate, extra = {}) {
     setBusy(true);
     try {
-      const res = await createEntry({ plate, branch: 0 });
+      const res = await createEntry({ plate, branch: 0, ...extra });
       notify(
         "success",
         `Δημιουργήθηκε εγγραφή! idDcl: ${res.idDcl} (ώρα: ${res.creationDateTime})`
@@ -344,10 +345,17 @@ function AuthenticatedApp({ workshop, onLogout }) {
           </div>
         );
       }
-      return <CameraCapture onConfirm={handleCreateEntry} disabled={busy} />;
+      return (
+        <CameraCapture
+          onConfirm={handleCreateEntry}
+          disabled={busy}
+          isRental={isRental}
+        />
+      );
     }
 
-    const s = STATUS_LABELS[activeEntry.status] || { text: activeEntry.status };
+    const statusLabels = isRental ? STATUS_LABELS_RENTAL : STATUS_LABELS;
+    const s = statusLabels[activeEntry.status] || { text: activeEntry.status };
 
     return (
       <>
@@ -391,15 +399,20 @@ function AuthenticatedApp({ workshop, onLogout }) {
             )}
         </div>
 
-        {/* Το στάδιο παράγεται από το status της συγκεκριμένης εγγραφής */}
-        {activeEntry.status === "open" && (
+        {/* Το στάδιο παράγεται από το status της συγκεκριμένης εγγραφής.
+            Ενοικιάσεις ΔΕΝ έχουν 2ο Χρόνο — από "open" πάνε κατευθείαν στην
+            Ολοκλήρωση (ExitForm), όχι στην Κατηγορία Εργασίας (ServiceForm). */}
+        {activeEntry.status === "open" && !isRental && (
           <ServiceForm onSubmit={handleService} disabled={busy} />
+        )}
+        {activeEntry.status === "open" && isRental && (
+          <ExitForm onSubmit={handleExit} disabled={busy} isRental />
         )}
         {activeEntry.status === "in_progress" && (
           <ExitForm onSubmit={handleExit} disabled={busy} />
         )}
         {activeEntry.status === "completed" && (
-          <QrScanner onCorrelate={handleCorrelate} disabled={busy} />
+          <QrScanner onCorrelate={handleCorrelate} disabled={busy} isRental={isRental} />
         )}
         {activeEntry.status === "correlated" && (
           <div className="card">
@@ -425,7 +438,7 @@ function AuthenticatedApp({ workshop, onLogout }) {
         {/* onClick: 5 tap μέσα σε 2s ενεργοποιεί κρυφό dev-mode tab (OCR
             στατιστικά) — δες useSecretDevMode(). Αόρατο στον πελάτη. */}
         <div className="brand" onClick={onSecretTap}>
-          🔧 Ψηφιακό Πελατολόγιο
+          {isRental ? "🚗 Ψηφιακό Πελατολόγιο Ενοικιάσεων" : "🔧 Ψηφιακό Πελατολόγιο"}
         </div>
         <div className="topbar-right">
           <button
@@ -483,6 +496,7 @@ function AuthenticatedApp({ workshop, onLogout }) {
             onAct={handleActOnEntry}
             onRefresh={refresh}
             onNewVehicle={handleNewVehicle}
+            isRental={isRental}
           />
         )}
         {tab === "customers" && (

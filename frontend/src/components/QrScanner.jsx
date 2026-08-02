@@ -11,7 +11,7 @@ import { parseMark } from "../utils";
 
 const REGION_ID = "qr-reader-region";
 
-export default function QrScanner({ onCorrelate, disabled }) {
+export default function QrScanner({ onCorrelate, disabled, isRental }) {
   const scannerRef = useRef(null);
   const [scanning, setScanning] = useState(false);
   const [mark, setMark] = useState("");
@@ -90,7 +90,7 @@ export default function QrScanner({ onCorrelate, disabled }) {
 
   return (
     <div className="card">
-      <h2>4ος Χρόνος — Συσχέτιση ΜΑΡΚ</h2>
+      <h2>{isRental ? "3ος Χρόνος" : "4ος Χρόνος"} — Συσχέτιση ΜΑΡΚ</h2>
       <p className="muted">
         Σκάναρε το QR της απόδειξης. Αν δεν διαβαστεί σωστά, γράψε τον ΜΑΡΚ
         χειροκίνητα.

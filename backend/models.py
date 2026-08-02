@@ -32,6 +32,13 @@ class Workshop(db.Model):
     # trial | active | past_due | cancelled — έλεγχος πρόσβασης βάσει αυτού
     # γίνεται όταν προστεθεί το billing layer (Stripe). Προς το παρόν "trial".
     subscription_status = db.Column(db.String(20), default="trial", nullable=False)
+    # garage (Συνεργείο, clientServiceType=3) | rental (Ενοικίαση Οχημάτων,
+    # clientServiceType=1) — επιλέγεται ΜΙΑ φορά στην εγγραφή, καθορίζει ποια
+    # ροή/πεδία ΑΑΔΕ χρησιμοποιεί ολόκληρη η εφαρμογή για αυτό το workshop.
+    # Nullable για να μην σπάνε παλιές εγκαταστάσεις χωρίς τη στήλη (auto-
+    # migration προσθέτει μόνο nullable) — None αντιμετωπίζεται ως "garage"
+    # (δες BUSINESS_TYPE_DEFAULT στο app.py).
+    business_type = db.Column(db.String(20), nullable=True)
     created_at = db.Column(db.DateTime, default=utcnow)
 
     def set_password(self, raw_password):
@@ -40,12 +47,22 @@ class Workshop(db.Model):
     def check_password(self, raw_password):
         return check_password_hash(self.password_hash, raw_password)
 
+    @property
+    def effective_business_type(self):
+        return self.business_type or "garage"
+
+    @property
+    def client_service_type(self):
+        """Κωδικός Τύπου Πελατολογίου ΑΑΔΕ: 1=Ενοικιάσεις, 3=Συνεργεία."""
+        return 1 if self.effective_business_type == "rental" else 3
+
     def to_dict(self):
         return {
             "id": self.id,
             "name": self.name,
             "email": self.email,
             "subscriptionStatus": self.subscription_status,
+            "businessType": self.effective_business_type,
             "createdAt": self.created_at.isoformat() if self.created_at else None,
         }
 
@@ -112,9 +129,19 @@ class DclEntry(db.Model):
     # Τύπος υπηρεσίας. Default "apax" = Άπαξ
     service_type = db.Column(db.String(20), default="apax", nullable=False)
 
-    # --- 2ος Χρόνος ---
+    # --- 2ος Χρόνος (ΜΟΝΟ Συνεργεία — clientServiceType=3) ---
     provided_service_category = db.Column(db.Integer, nullable=True)
     provided_service_category_other = db.Column(db.String(255), nullable=True)
+
+    # --- Ενοικιάσεις (clientServiceType=1) — δεν υπάρχει 2ος Χρόνος, οι
+    # Ενοικιάσεις πάνε κατευθείαν από 1ο σε 3ο Χρόνο. Πεδία του rental
+    # useCase (1ος Χρόνος) + του updateClientType (3ος Χρόνος).
+    vehicle_movement_purpose = db.Column(db.Integer, nullable=True)  # 1ος Χρόνος
+    is_diff_pickup_location = db.Column(db.Boolean, nullable=True)  # 1ος Χρόνος
+    vehicle_pickup_location = db.Column(db.String(250), nullable=True)  # 1ος Χρόνος
+    is_diff_return_location = db.Column(db.Boolean, nullable=True)  # 3ος Χρόνος
+    vehicle_return_location = db.Column(db.String(250), nullable=True)  # 3ος Χρόνος
+    amount = db.Column(db.Float, nullable=True)  # 3ος Χρόνος — Συμφωνηθέν Ποσό
 
     # --- 3ος Χρόνος ---
     entry_completion = db.Column(db.Boolean, default=False, nullable=False)
@@ -151,14 +178,22 @@ class DclEntry(db.Model):
         ακόμη από την ΑΑΔΕ (π.χ. λόγω διακοπής internet κατά την αποστολή).
         None -> τίποτα εκκρεμές, όλα όσα έχουν γίνει είναι επιβεβαιωμένα.
         Χρησιμοποιείται από το frontend για να δείξει κουμπί «Επαναποστολή».
+
+        Ενοικιάσεις (client_service_type=1) ΔΕΝ έχουν 2ο Χρόνο (κατηγορία
+        υπηρεσίας) — πάνε κατευθείαν "open" -> "completed" μέσω exit.
         """
         if self.status == "cancelled":
             return None
         if self.id_dcl is None:
             return "entry"
-        if self.status == "open" and self.provided_service_category is not None:
+        is_rental = self.client_service_type == 1
+        if not is_rental and self.status == "open" and self.provided_service_category is not None:
             return "service"
-        if self.status == "in_progress" and self.invoice_kind is not None and not self.entry_completion:
+        if is_rental and self.status == "open" and (
+            self.invoice_kind is not None or self.amount is not None
+        ) and not self.entry_completion:
+            return "exit"
+        if not is_rental and self.status == "in_progress" and self.invoice_kind is not None and not self.entry_completion:
             return "exit"
         if self.status == "completed" and self.mark is not None and self.correlate_id is None:
             return "correlate"
@@ -174,6 +209,12 @@ class DclEntry(db.Model):
             "serviceType": self.service_type,
             "providedServiceCategory": self.provided_service_category,
             "providedServiceCategoryOther": self.provided_service_category_other,
+            "vehicleMovementPurpose": self.vehicle_movement_purpose,
+            "isDiffVehPickupLocation": self.is_diff_pickup_location,
+            "vehiclePickupLocation": self.vehicle_pickup_location,
+            "isDiffVehReturnLocation": self.is_diff_return_location,
+            "vehicleReturnLocation": self.vehicle_return_location,
+            "amount": self.amount,
             "entryCompletion": self.entry_completion,
             "invoiceKind": self.invoice_kind,
             "creationDateTime": self.creation_date_time.isoformat()

@@ -397,6 +397,42 @@ textarea.input {
   cursor: default;
 }
 
+/* Επιλογή τύπου επιχείρησης — εγγραφή */
+.business-type-picker {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.business-type-card {
+  flex: 1;
+  min-width: 140px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 14px;
+  text-align: left;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+}
+.business-type-card.is-selected {
+  border-color: #2563eb;
+  background: rgba(37, 99, 235, 0.1);
+}
+.business-type-icon {
+  font-size: 1.5rem;
+}
+.business-type-label {
+  font-weight: 600;
+}
+.business-type-desc {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
 /* Επιφυλάξεις της ανάλυσης OCR */
 .ocr-warn {
   margin-top: 8px;

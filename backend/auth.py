@@ -37,6 +37,10 @@ admin_bp = Blueprint("admin", __name__, url_prefix="/api/admin")
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
+# garage (Συνεργείο) | rental (Ενοικίαση Οχημάτων) — επιλέγεται στην εγγραφή,
+# καθορίζει μόνιμα ποιο clientServiceType/ροή ΑΑΔΕ χρησιμοποιεί το workshop.
+BUSINESS_TYPES = {"garage", "rental"}
+
 # Καταστάσεις που επιτρέπουν χρήση της εφαρμογής. "past_due"/"cancelled"
 # μπλοκάρουν — ο πωλητής τα αλλάζει χειροκίνητα μέσω /api/admin μετά από
 # τραπεζική μεταφορά (δεν υπάρχει Stripe/αυτόματη χρέωση).
@@ -101,18 +105,21 @@ def register():
     name = (data.get("name") or "").strip()
     email = (data.get("email") or "").strip().lower()
     password = data.get("password") or ""
+    business_type = (data.get("businessType") or "").strip().lower()
 
     if not name:
-        return jsonify({"error": "Το όνομα συνεργείου είναι υποχρεωτικό."}), 400
+        return jsonify({"error": "Το όνομα επιχείρησης είναι υποχρεωτικό."}), 400
     if not EMAIL_RE.match(email):
         return jsonify({"error": "Μη έγκυρο email."}), 400
     if len(password) < 8:
         return jsonify({"error": "Ο κωδικός πρέπει να έχει τουλάχιστον 8 χαρακτήρες."}), 400
+    if business_type not in BUSINESS_TYPES:
+        return jsonify({"error": "Επίλεξε τύπο επιχείρησης (Συνεργείο ή Ενοικίαση Οχημάτων)."}), 400
 
     if Workshop.query.filter_by(email=email).first() is not None:
         return jsonify({"error": "Υπάρχει ήδη λογαριασμός με αυτό το email."}), 409
 
-    workshop = Workshop(name=name, email=email)
+    workshop = Workshop(name=name, email=email, business_type=business_type)
     workshop.set_password(password)
     db.session.add(workshop)
     db.session.commit()
