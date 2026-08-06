@@ -6,7 +6,7 @@
 // --------------------------------------------------------------------
 import { useEffect, useMemo, useRef, useState } from "react";
 import { STATUS_LABELS, STATUS_LABELS_RENTAL } from "../constants";
-import { reconcileEntry } from "../services/api";
+import { reconcileEntry, importFromAade } from "../services/api";
 
 // Καταστάσεις που η ΑΑΔΕ θεωρεί ήδη οριστικές — δεν χρειάζεται να τις
 // ξαναρωτάμε σε κάθε άνοιγμα του tab.
@@ -68,6 +68,8 @@ export default function EntriesList({
   const [search, setSearch] = useState("");
   const [recon, setRecon] = useState({}); // {entryId: {loading, result}}
   const [autoSyncing, setAutoSyncing] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState(null);
 
   // Μετρητές ανά στάδιο
   const counts = useMemo(() => {
@@ -132,6 +134,33 @@ export default function EntriesList({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entries, loading]);
 
+  // Εισαγωγή εγγραφών που υπάρχουν στην ΑΑΔΕ αλλά όχι ακόμα τοπικά (π.χ.
+  // καταχωρήθηκαν απευθείας στο back-office της ΑΑΔΕ, ή πριν συνδεθεί η
+  // εφαρμογή). Χειροκίνητο — δεν τρέχει αυτόματα, γιατί μπορεί να διαβάσει
+  // πολλές σελίδες δεδομένων από την ΑΑΔΕ.
+  async function handleImport() {
+    if (
+      !window.confirm(
+        "Εισαγωγή εγγραφών από την ΑΑΔΕ; Θα δημιουργηθούν τοπικά αντίγραφα " +
+          "για όσες εγγραφές υπάρχουν στο Ψηφιακό Πελατολόγιο αλλά λείπουν " +
+          "από αυτή τη λίστα. Μπορεί να πάρει λίγα δευτερόλεπτα."
+      )
+    ) {
+      return;
+    }
+    setImporting(true);
+    setImportResult(null);
+    try {
+      const result = await importFromAade();
+      setImportResult(result);
+      if (result.imported > 0) onRefresh();
+    } catch (err) {
+      setImportResult({ ok: false, reason: err.message });
+    } finally {
+      setImporting(false);
+    }
+  }
+
   function reconLine(entry) {
     const st = recon[entry.id];
     if (!st) return null;
@@ -155,15 +184,39 @@ export default function EntriesList({
     <div className="card">
       <div className="list-header">
         <h2>Εγγραφές — Ενεργές εργασίες</h2>
-        <button className="btn btn-ghost btn-sm" onClick={onRefresh}>
-          ↻ Ανανέωση
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={handleImport}
+            disabled={importing}
+          >
+            {importing ? "Εισαγωγή…" : "⬇️ Εισαγωγή από ΑΑΔΕ"}
+          </button>
+          <button className="btn btn-ghost btn-sm" onClick={onRefresh}>
+            ↻ Ανανέωση
+          </button>
+        </div>
       </div>
       <p className="muted">
         Ό,τι χρειάζεται δράση ΤΩΡΑ — μία γραμμή ανά επίσκεψη οχήματος, με
         κουμπί για το επόμενο βήμα. (Για ιστορικό ή στατιστικά ανά πελάτη,
-        δες τα tabs «Πελάτες» και «Ιστορικό».)
+        δες τα tabs «Πελάτες» και «Ιστορικό».) Το «Εισαγωγή από ΑΑΔΕ» φέρνει
+        εγγραφές που υπάρχουν στο Ψηφιακό Πελατολόγιο αλλά όχι ακόμα εδώ.
       </p>
+
+      {importResult && (
+        <div
+          className={`alert ${
+            importResult.ok === false ? "alert-error" : "alert-info"
+          }`}
+        >
+          {importResult.mock
+            ? `ℹ️ ${importResult.message}`
+            : importResult.ok === false
+            ? `❌ ${importResult.reason}`
+            : `✅ Εισήχθησαν ${importResult.imported} νέες εγγραφές (παραλείφθηκαν ${importResult.skipped} που υπήρχαν ήδη).`}
+        </div>
+      )}
 
       {autoSyncing && (
         <div className="alert alert-info small">

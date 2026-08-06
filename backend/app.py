@@ -151,6 +151,15 @@ def _parse_int(value, field_name):
         raise ApiError(f"Το πεδίο '{field_name}' πρέπει να είναι ακέραιος.")
 
 
+def _opt_int(value):
+    """Σαν _parse_int αλλά επιστρέφει None αντί να σηκώνει σφάλμα — για
+    προαιρετικά/άγνωστα πεδία όταν εισάγουμε δεδομένα από την ΑΑΔΕ."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 # Ελληνικά γράμματα πινακίδας -> λατινικό οπτικό αντίστοιχο (ίδια αντιστοίχιση
 # με frontend/src/utils.js GREEK_TO_LATIN). Χρειάζεται ΚΑΙ εδώ γιατί το
 # vehicleRegistrationNumber της ΑΑΔΕ και η στήλη plate περιμένουν λατινικά,
@@ -1320,6 +1329,135 @@ def register_routes(app):
                 "matches": matches,
             }
         )
+
+    # ----------------------------------------------------------------
+    # Εισαγωγή από ΑΑΔΕ — φέρνει εγγραφές που υπάρχουν στο Ψηφιακό
+    # Πελατολόγιο (RequestClients) αλλά όχι ακόμα τοπικά (π.χ. καταχωρήθηκαν
+    # απευθείας στο back-office της ΑΑΔΕ, ή πριν συνδεθεί αυτή η εφαρμογή).
+    # Το reconcile() ενημερώνει ό,τι ήδη ξέρουμε· αυτό φέρνει ό,τι λείπει.
+    # ----------------------------------------------------------------
+    @app.route("/api/dcl/import-from-aade", methods=["POST"])
+    @require_auth
+    def import_from_aade():
+        settings = _get_settings()
+        if not settings.has_key or not settings.aade_username:
+            raise ApiError(
+                "Δεν έχουν οριστεί οι κωδικοί ΑΑΔΕ — πήγαινε στις Ρυθμίσεις.", 400
+            )
+
+        use_mock = current_app.config["USE_MOCK_AADE"] and not settings.force_real_aade
+        if use_mock:
+            return jsonify(
+                {
+                    "ok": True,
+                    "mock": True,
+                    "message": "Mock mode — δεν έγινε εισαγωγή από ΑΑΔΕ.",
+                    "imported": 0,
+                    "skipped": 0,
+                }
+            )
+
+        aade = _build_aade(settings)
+
+        existing_ids = {
+            e.id_dcl
+            for e in DclEntry.query.filter_by(workshop_id=g.workshop_id).all()
+            if e.id_dcl
+        }
+
+        imported = 0
+        skipped = 0
+        dclid = 0
+        continuation = None
+        pages = 0
+        MAX_PAGES = 200  # ασφαλιστική δικλείδα κατά ατέρμονου loop
+
+        while pages < MAX_PAGES:
+            res = aade.request_clients(dclid=dclid, continuation_token=continuation)
+            _log_aade(
+                None,
+                "RequestClients",
+                {"dclid": dclid, "continuationToken": continuation},
+                res,
+                "error" not in res,
+            )
+            if "error" in res:
+                db.session.commit()
+                return jsonify(
+                    {
+                        "ok": False,
+                        "reason": res["error"],
+                        "imported": imported,
+                        "skipped": skipped,
+                    }
+                )
+
+            clients = res.get("clients") or []
+            if not clients:
+                break
+
+            for client in clients:
+                init = client.get("InitialClientData", {}) or {}
+                upd = client.get("UpdatedClientData", {}) or {}
+                id_dcl = str(init.get("idDcl") or "").strip()
+                if not id_dcl or id_dcl in existing_ids:
+                    skipped += 1
+                    continue
+
+                use_case = init.get("useCase") or {}
+                garage = use_case.get("garage") or {}
+                rental = use_case.get("rental") or {}
+                plate = (
+                    garage.get("vehicleRegistrationNumber")
+                    or rental.get("vehicleRegistrationNumber")
+                    or "—"
+                )
+
+                cancellation = _find_cancellation(res, id_dcl)
+                correlation = _find_correlation(res, id_dcl)
+                category = upd.get("providedServiceCategory")
+
+                if cancellation is not None:
+                    status = "cancelled"
+                elif correlation is not None:
+                    status = "correlated"
+                elif str(upd.get("entryCompletion")).lower() == "true":
+                    status = "completed"
+                elif category not in (None, ""):
+                    status = "in_progress"
+                else:
+                    status = "open"
+
+                entry = DclEntry(
+                    workshop_id=g.workshop_id,
+                    id_dcl=id_dcl,
+                    plate=plate.strip().upper(),
+                    branch=_opt_int(init.get("branch")) or settings.branch,
+                    client_service_type=_opt_int(init.get("clientServiceType")) or 3,
+                    status=status,
+                    provided_service_category=_opt_int(category),
+                    provided_service_category_other=upd.get(
+                        "providedServiceCategoryOther"
+                    ),
+                    invoice_kind=_opt_int(upd.get("invoiceKind")),
+                    creation_date_time=_parse_aade_dt(init.get("creationDateTime")),
+                    completion_date_time=_parse_aade_dt(upd.get("completionDateTime")),
+                    entry_completion=str(upd.get("entryCompletion")).lower() == "true",
+                )
+                if correlation is not None:
+                    entry.mark = correlation.get("mark")
+                    entry.correlate_id = correlation.get("correlateId")
+                db.session.add(entry)
+                existing_ids.add(id_dcl)
+                imported += 1
+
+            pages += 1
+            continuation = res.get("continuationToken")
+            if not continuation:
+                break
+
+        db.session.commit()
+        return jsonify({"ok": True, "imported": imported, "skipped": skipped})
 
 
 # --------------------------------------------------------------------

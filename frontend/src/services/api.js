@@ -260,6 +260,11 @@ export function reconcileEntry(entry_id) {
   return request(`/api/dcl/reconcile/${entry_id}`);
 }
 
+// Εισαγωγή εγγραφών που υπάρχουν στην ΑΑΔΕ αλλά όχι ακόμα τοπικά
+export function importFromAade() {
+  return request("/api/dcl/import-from-aade", { method: "POST" });
+}
+
 // Επαναποστολή — η εγγραφή είναι αποθηκευμένη αλλά ο τελευταίος Χρόνος δεν
 // επιβεβαιώθηκε από την ΑΑΔΕ (π.χ. έπεσε το internet).
 export function resendEntry(entry_id) {
