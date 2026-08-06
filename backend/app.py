@@ -151,12 +151,42 @@ def _parse_int(value, field_name):
         raise ApiError(f"Το πεδίο '{field_name}' πρέπει να είναι ακέραιος.")
 
 
+# Ελληνικά γράμματα πινακίδας -> λατινικό οπτικό αντίστοιχο (ίδια αντιστοίχιση
+# με frontend/src/utils.js GREEK_TO_LATIN). Χρειάζεται ΚΑΙ εδώ γιατί το
+# vehicleRegistrationNumber της ΑΑΔΕ και η στήλη plate περιμένουν λατινικά,
+# και ο χρήστης μπορεί να στείλει "ΙΚΧ-1833" απευθείας μέσω API/import χωρίς
+# να περάσει ποτέ από το frontend.
+_PLATE_LETTERS_LATIN = "ABEZHIKMNOPTYX"
+_PLATE_LETTERS_GREEK = "ΑΒΕΖΗΙΚΜΝΟΡΤΥΧ"
+_GREEK_TO_LATIN = dict(zip(_PLATE_LETTERS_GREEK, _PLATE_LETTERS_LATIN))
+
+
+def _to_latin_plate(plate):
+    """Μετατρέπει τυχόν ελληνικά γράμματα πινακίδας στα λατινικά αντίστοιχά
+    τους. Καμία αλλαγή σε ήδη-λατινικές πινακίδες ή σε μη-γράμματα."""
+    if not plate:
+        return plate
+    return "".join(_GREEK_TO_LATIN.get(ch, ch) for ch in plate)
+
+
 def _normalize_plate(plate):
-    """Αφαιρεί ό,τι δεν είναι γράμμα/ψηφίο ώστε η σύγκριση "ΙΚΧ-1833" vs
-    "ΙΚΧ1833" να μην μετράει σαν χειροκίνητη διόρθωση."""
+    """Κανονική μορφή πινακίδας για σύγκριση/αποθήκευση: λατινικά γράμματα,
+    uppercase, χωρίς ό,τι δεν είναι γράμμα/ψηφίο (ώστε η σύγκριση "ΙΚΧ-1833"
+    vs "IKX1833" να μη μετράει σαν χειροκίνητη διόρθωση, και ώστε η ίδια
+    πινακίδα σε ελληνικά/λατινικά να ταυτίζεται πάντα με ΕΝΑΝ Customer)."""
     if not plate:
         return ""
-    return re.sub(r"[^A-Z0-9Α-Ω]", "", plate.upper())
+    return re.sub(r"[^A-Z0-9]", "", _to_latin_plate(plate.upper()))
+
+
+def _canonical_plate(plate):
+    """Κανονική μορφή ΑΠΟΘΗΚΕΥΣΗΣ: λατινικά γράμματα, uppercase, ΔΙΑΤΗΡΕΙ την
+    παύλα/κενά (σε αντίθεση με _normalize_plate που είναι μόνο για σύγκριση).
+    Εφαρμόζεται σε κάθε plate πριν αποθηκευτεί (entry ή customer), ώστε η ίδια
+    πινακίδα να έχει ΠΑΝΤΑ μία αναπαράσταση στη βάση."""
+    if not plate:
+        return plate
+    return _to_latin_plate(plate.strip().upper())
 
 
 def _get_workshop():
@@ -532,7 +562,11 @@ def register_routes(app):
         workshop = _get_workshop()
         is_rental = workshop.client_service_type == 1
 
-        plate = (data.get("plate") or "").strip()
+        # Κανονικοποίηση ΕΔΩ (όχι μόνο στο frontend): η ίδια πινακίδα σε
+        # ελληνικά/λατινικά γράμματα πρέπει ΠΑΝΤΑ να καταλήγει στον ΙΔΙΟ
+        # Customer — αλλιώς το unique constraint plate+workshop δημιουργεί
+        # σιωπηλά διπλότυπους πελάτες για την ίδια πινακίδα.
+        plate = _canonical_plate((data.get("plate") or "").strip())
         # Το branch έρχεται ΑΠΟ ΤΙΣ ΡΥΘΜΙΣΕΙΣ (όχι hardcoded/από το body)
         branch = settings.branch
 
@@ -960,7 +994,7 @@ def register_routes(app):
             raise ApiError("Δεν βρέθηκε η μετρική.", 404)
 
         data = request.get_json(silent=True) or {}
-        final_plate = (data.get("finalPlate") or "").strip().upper() or None
+        final_plate = _canonical_plate((data.get("finalPlate") or "").strip()) or None
 
         metric.final_plate = final_plate
         metric.confirmed = True

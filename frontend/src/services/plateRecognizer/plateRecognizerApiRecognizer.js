@@ -20,9 +20,12 @@
 // Recognizer) — πρόσεξε privacy/όρους πριν το ενεργοποιήσεις σε παραγωγή.
 // --------------------------------------------------------------------
 import { API_URL } from "../api";
+import { parsePlateDetailed } from "../../utils";
 
 /**
- * @param {HTMLCanvasElement|HTMLImageElement} imageSource - (ήδη cropped) περιοχή πλάκας
+ * @param {HTMLCanvasElement|HTMLImageElement} imageSource - περιοχή πλάκας (με λίγο
+ *   περιθώριο γύρω — το ALPR κάνει ΔΙΚΟ ΤΟΥ plate detection, οπότε ένα πολύ
+ *   στενό crop σαν του Tesseract του αφαιρεί χρήσιμο context αντί να βοηθά)
  * @param {(pct:number)=>void} [onProgress] - το ALPR δεν εκθέτει ενδιάμεση πρόοδο
  */
 export async function recognizePlate(imageSource, onProgress) {
@@ -66,17 +69,28 @@ export async function recognizePlate(imageSource, onProgress) {
 
   onProgress?.(100);
 
-  const plate = data?.plate ? String(data.plate).toUpperCase() : null;
+  // Το Plate Recognizer επιστρέφει το κείμενο ΧΩΡΙΣ παύλα ("iky1833") — το
+  // περνάμε από τον ΙΔΙΟ parser με το Tesseract path ώστε ΚΑΙ τα δύο engines
+  // να παράγουν την ΙΔΙΑ μορφή ("IKY-1833", λατινικά) και ίδιο validation.
+  // Χωρίς αυτό, ο Tesseract path έγραφε "IKY-1833" και το ALPR path έγραφε
+  // "IKY1833" στην ΙΔΙΑ βάση/ΑΑΔΕ.
+  const rawPlate = data?.plate ? String(data.plate) : "";
+  const parsed = parsePlateDetailed(rawPlate);
+
   return {
-    plate,
+    plate: parsed.plate,
     confidence:
       typeof data?.confidence === "number" ? Math.round(data.confidence) : null,
-    rawText: plate || "",
-    warnings: [],
-    corrected: false,
+    rawText: rawPlate,
+    warnings: parsed.warnings,
+    corrected: parsed.corrected,
     // Δεν κάνουμε client-side preprocessing σε αυτό το path — το ALPR
     // δουλεύει πάνω στην αρχική εικόνα, οπότε δεν υπάρχει "OCR input" preview.
     processedDataUrl: null,
+    // Εναλλακτικές αναγνώσεις του ALPR (score ανά υποψήφια πινακίδα) — το
+    // backend τις υπολογίζει ήδη (δες app.py /api/ocr/plate) αλλά μέχρι τώρα
+    // πετάγονταν εδώ. Χρήσιμες για μελλοντικό UI επιλογής/επιβεβαίωσης.
+    candidates: Array.isArray(data?.candidates) ? data.candidates : [],
   };
 }
 

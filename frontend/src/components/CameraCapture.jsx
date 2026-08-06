@@ -8,8 +8,9 @@
 // --------------------------------------------------------------------
 import { useEffect, useRef, useState } from "react";
 import { getRecognizer, recognizerName } from "../services/plateRecognizer";
-import { logOcrAttempt, confirmOcrMetric } from "../services/api";
+import { logOcrAttempt, confirmOcrMetric, getCustomers } from "../services/api";
 import { VEHICLE_MOVEMENT_PURPOSES } from "../constants";
+import { normalizePlateInput, findClosestKnownPlate } from "../utils";
 // Ελαφρύ heuristic (χωρίς OCR) για ζωντανό feedback ευθυγράμμισης — δουλεύει
 // πάνω στο ίδιο pipeline denoising ανεξάρτητα από το ποιος recognizer είναι
 // ενεργός (Tesseract ή μελλοντικό ALPR), γι' αυτό εισάγεται απευθείας.
@@ -72,22 +73,42 @@ function visibleVideoRect(video, boxW, boxH) {
  * Υπολογίζει το crop-rect του πλαισίου-οδηγού σε συντεταγμένες βίντεο.
  * Χρησιμοποιείται ΚΑΙ από το πραγματικό «Σκάναρε» ΚΑΙ από το ζωντανό
  * alignment-check, ώστε να βλέπουν πάντα ΑΚΡΙΒΩΣ το ίδιο παράθυρο.
+ *
+ * @param {number} [expand] - πολλαπλασιαστής μεγέθους γύρω από το ΚΕΝΤΡΟ του
+ *   πλαισίου-οδηγού (1 = ακριβώς το πλαίσιο). Το εξειδικευμένο ALPR κάνει ΔΙΚΟ
+ *   ΤΟΥ plate detection και αποδίδει καλύτερα με λίγο context γύρω από την
+ *   πλάκα, σε αντίθεση με το Tesseract που θέλει το ΣΤΕΝΟ crop (λιγότερος
+ *   θόρυβος για το δικό του blob-based denoising).
  */
-function computeCropRect(video, frame, mode) {
+function computeCropRect(video, frame, mode, expand = 1) {
   if (!video || !frame) return null;
   const box = frame.getBoundingClientRect();
   if (!box.width || !box.height) return null;
   const view = visibleVideoRect(video, box.width, box.height);
   const guide = GUIDES[mode];
 
-  const guideW = guide.widthFrac * box.width;
-  const guideH = guideW / guide.aspect;
-  const sw = Math.max(1, Math.round((guideW / box.width) * view.w));
-  const sh = Math.max(1, Math.round((guideH / box.height) * view.h));
+  const guideW = guide.widthFrac * box.width * expand;
+  const guideH = (guideW / expand / guide.aspect) * expand;
+  const sw = Math.min(view.w, Math.max(1, Math.round((guideW / box.width) * view.w)));
+  const sh = Math.min(view.h, Math.max(1, Math.round((guideH / box.height) * view.h)));
   const sx = Math.round(view.x + (view.w - sw) / 2);
   const sy = Math.round(view.y + (view.h - sh) / 2);
   return { sx, sy, sw, sh };
 }
+
+/** Παίρνει ένα crop-rect (σε συντ. βίντεο) και επιστρέφει canvas με το περιεχόμενο. */
+function drawCrop(video, rect) {
+  const { sx, sy, sw, sh } = rect;
+  const canvas = document.createElement("canvas");
+  canvas.width = sw;
+  canvas.height = sh;
+  canvas.getContext("2d").drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
+  return canvas;
+}
+
+// Πόσο μεγαλύτερο (γύρω από το ίδιο κέντρο) είναι το crop που στέλνουμε στο
+// εξωτερικό ALPR σε σχέση με το στενό πλαίσιο-οδηγό του Tesseract.
+const ALPR_CROP_EXPAND = 1.6;
 
 export default function CameraCapture({ onConfirm, disabled, isRental }) {
   const videoRef = useRef(null);
@@ -107,6 +128,10 @@ export default function CameraCapture({ onConfirm, disabled, isRental }) {
   const [confidence, setConfidence] = useState(null);
   const [rawText, setRawText] = useState("");
   const [warnings, setWarnings] = useState([]);
+  // Ποιο engine ΠΡΑΓΜΑΤΙΚΑ απάντησε στην τελευταία σάρωση (μετά από τυχόν
+  // fallback ALPR -> Tesseract) — βλ. services/plateRecognizer/index.js.
+  const [engineUsed, setEngineUsed] = useState(null);
+  const [engineFallback, setEngineFallback] = useState(false);
   const [preview, setPreview] = useState(null); // dataURL προεπεξεργασμένης εικόνας
   const [aligned, setAligned] = useState(false); // ζωντανό feedback πλαισίου
   const [flashSupported, setFlashSupported] = useState(false);
@@ -125,6 +150,14 @@ export default function CameraCapture({ onConfirm, disabled, isRental }) {
   // id της ΤΕΛΕΥΤΑΙΑΣ σάρωσης στο backend (OcrMetric) — για να ενημερώσουμε
   // αν τελικά ο χρήστης το διόρθωσε χειροκίνητα, όταν πατήσει «Δημιουργία».
   const lastMetricIdRef = useRef(null);
+  // Γνωστές πινακίδες (πελάτες αυτού του συνεργείου) — φορτώνονται μία φορά
+  // στο άνοιγμα της κάμερας, ΟΧΙ σε state (δεν χρειάζεται re-render, μόνο
+  // ανάγνωση μέσα στο captureAndRecognize). Best-effort: αν αποτύχει η
+  // φόρτωση, απλά δεν προτείνεται καμία διόρθωση — καμία επίπτωση στη ροή.
+  const knownPlatesRef = useRef([]);
+  // Πρόταση διόρθωσης βάσει γνωστής πινακίδας ("μήπως εννοείς...") — δες
+  // findClosestKnownPlate στο utils.js.
+  const [plateSuggestion, setPlateSuggestion] = useState(null);
 
   useEffect(() => {
     return () => stopCamera();
@@ -212,8 +245,18 @@ export default function CameraCapture({ onConfirm, disabled, isRental }) {
   async function startCamera() {
     setError("");
     try {
+      // Ζητάμε ΥΨΗΛΗ ανάλυση ρητά — χωρίς αυτό πολλά κινητά δίνουν default
+      // 640x480, οπότε το crop του πλαισίου-οδηγού (~80% πλάτους πάνω σε μια
+      // πινακίδα μακριά) καταλήγει μόλις μερικές εκατοντάδες px πλάτος πριν
+      // το OCR — δεν υπάρχει αρκετή πληροφορία για σωστή αναγνώριση όσο καλό
+      // κι αν είναι το preprocessing μετά. "ideal" ώστε να μην αποτύχει η
+      // κάμερα αν η συσκευή δεν υποστηρίζει τόσο μεγάλη ανάλυση.
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" } },
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
         audio: false,
       });
       streamRef.current = stream;
@@ -223,6 +266,16 @@ export default function CameraCapture({ onConfirm, disabled, isRental }) {
       }
       setCameraOn(true);
 
+      // Φόρτωσε τις γνωστές πινακίδες (fire-and-forget) για το «μήπως εννοείς»
+      // πρόταση διόρθωσης παρακάτω — δεν μπλοκάρει το άνοιγμα της κάμερας.
+      getCustomers()
+        .then((customers) => {
+          knownPlatesRef.current = customers || [];
+        })
+        .catch(() => {
+          knownPlatesRef.current = [];
+        });
+
       // Φλας (torch) — υποστηρίζεται μόνο σε μερικά Android/Chrome, ΟΧΙ σε
       // iOS Safari. Ελέγχουμε τις δυνατότητες του track πριν δείξουμε το
       // κουμπί, ώστε να μην εμφανίζεται κάτι που δεν κάνει τίποτα.
@@ -230,6 +283,20 @@ export default function CameraCapture({ onConfirm, disabled, isRental }) {
       const capabilities = track?.getCapabilities?.();
       setFlashSupported(!!capabilities?.torch);
       setFlashOn(false);
+
+      // Συνεχής αυτόματη εστίαση — αν δεν οριστεί ρητά, κάποιες κάμερες
+      // κλειδώνουν την εστίαση στο πρώτο frame (συχνά μακρινό/θολό background
+      // πριν ο χρήστης φέρει την πλάκα στο πλαίσιο). Best-effort: αγνόησε αν
+      // η συσκευή δεν το υποστηρίζει (π.χ. iOS Safari δεν εκθέτει focusMode).
+      if (capabilities?.focusMode?.includes("continuous")) {
+        try {
+          await track.applyConstraints({
+            advanced: [{ focusMode: "continuous" }],
+          });
+        } catch {
+          // αγνόησε — απλή βελτίωση, όχι κρίσιμη λειτουργία
+        }
+      }
     } catch (err) {
       setError(
         "Δεν ήταν δυνατή η πρόσβαση στην κάμερα. Έλεγξε τα δικαιώματα. " +
@@ -266,42 +333,49 @@ export default function CameraCapture({ onConfirm, disabled, isRental }) {
     const frame = frameRef.current;
     if (!video || !frame) return;
 
-    // Crop ΜΟΝΟ την περιοχή του πλαισίου-οδηγού, μεταφρασμένη από τις
-    // συντεταγμένες της οθόνης σε συντεταγμένες του καρέ της κάμερας.
+    // Crop ΤΗΝ περιοχή του πλαισίου-οδηγού, μεταφρασμένη από τις συντεταγμένες
+    // της οθόνης σε συντεταγμένες του καρέ της κάμερας. Στενό crop για το
+    // Tesseract· ελαφρώς φαρδύτερο για το εξειδικευμένο ALPR (κάνει δικό του
+    // plate detection, βλ. computeCropRect).
     const rect = computeCropRect(video, frame, mode);
     if (!rect) return;
-    const { sx, sy, sw, sh } = rect;
+    const wideRect = computeCropRect(video, frame, mode, ALPR_CROP_EXPAND);
 
-    const crop = document.createElement("canvas");
-    crop.width = sw;
-    crop.height = sh;
-    crop.getContext("2d").drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
+    const crop = drawCrop(video, rect);
+    const wideCrop = wideRect ? drawCrop(video, wideRect) : crop;
 
     setOcrRunning(true);
     setProgress(0);
     setConfidence(null);
     setRawText("");
     setWarnings([]);
+    setEngineFallback(false);
     setPreview(null);
+    setPlateSuggestion(null);
     try {
       const recognizer = getRecognizer();
       const result = await recognizer.recognizePlate(
         crop,
         (pct) => setProgress(pct),
-        { mode }
+        { mode, wideImageSource: wideCrop }
       );
 
       if (typeof result.confidence === "number") setConfidence(result.confidence);
       setRawText(result.rawText || "");
       setWarnings(result.warnings || []);
+      setEngineUsed(result.engineUsed || recognizerName);
+      setEngineFallback(!!result.engineFallback);
       if (result.processedDataUrl) setPreview(result.processedDataUrl);
 
       // Καταγραφή ΚΑΘΕ σάρωσης (fire-and-forget) — ποτέ δεν πρέπει να
-      // μπλοκάρει ή να χαλάσει τη ροή αν το backend δεν απαντήσει.
+      // μπλοκάρει ή να χαλάσει τη ροή αν το backend δεν απαντήσει. Η μηχανή
+      // καταγράφεται ΩΣ ΠΡΑΓΜΑΤΙΚΑ χρησιμοποιήθηκε (μετά από τυχόν fallback),
+      // όχι η στατική ρύθμιση — αλλιώς οι μετρικές "tesseract" θα αναμιγνύονταν
+      // κρυφά με σαρώσεις που στην πραγματικότητα έκανε το ALPR.
       lastMetricIdRef.current = null;
       logOcrAttempt({
         mode,
-        engine: recognizerName,
+        engine: result.engineUsed || recognizerName,
         ocrPlate: result.plate || null,
         confidence: typeof result.confidence === "number" ? result.confidence : null,
         warningsCount: (result.warnings || []).length,
@@ -318,6 +392,13 @@ export default function CameraCapture({ onConfirm, disabled, isRental }) {
         // η κάμερα μετακινηθεί αλλού. Ο χρήστης μπορεί πάντα να πατήσει
         // χειροκίνητα «Σκάναρε» για να ξαναδοκιμάσει.
         scanLockedRef.current = true;
+
+        // «Μήπως εννοείς...»: αν η ανάγνωση διαφέρει 1 χαρακτήρα από γνωστό
+        // πελάτη, είναι πολύ πιο πιθανό να είναι λάθος ανάγνωση παρά νέο
+        // όχημα με σχεδόν ίδια πινακίδα — πρότεινε τη διόρθωση, μην την
+        // επιβάλλεις (ο χρήστης αποφασίζει).
+        const match = findClosestKnownPlate(result.plate, knownPlatesRef.current);
+        setPlateSuggestion(match);
       } else {
         setPlate("");
         setError(
@@ -336,8 +417,18 @@ export default function CameraCapture({ onConfirm, disabled, isRental }) {
     }
   }
 
+  function acceptPlateSuggestion() {
+    if (!plateSuggestion) return;
+    setPlate(plateSuggestion.plate);
+    setPlateSuggestion(null);
+  }
+
+  function dismissPlateSuggestion() {
+    setPlateSuggestion(null);
+  }
+
   function handleConfirm() {
-    const value = plate.trim().toUpperCase();
+    const value = normalizePlateInput(plate);
     if (!value) {
       setError("Συμπλήρωσε πινακίδα πριν τη δημιουργία εγγραφής.");
       return;
@@ -457,14 +548,43 @@ export default function CameraCapture({ onConfirm, disabled, isRental }) {
         )}
       </div>
 
+      {/* «Μήπως εννοείς...» — η ανάγνωση διαφέρει 1 χαρακτήρα από γνωστό
+          πελάτη αυτού του συνεργείου. Ο χρήστης αποφασίζει, δεν επιβάλλεται. */}
+      {plateSuggestion && (
+        <div className="alert alert-info plate-suggestion">
+          🔎 Μήπως εννοείς <b>{plateSuggestion.plate}</b>
+          {plateSuggestion.name ? ` — ${plateSuggestion.name}` : ""}; Το OCR
+          διάβασε «{plate}».
+          <div className="btn-row">
+            <button
+              type="button"
+              className="btn btn-sm btn-primary"
+              onClick={acceptPlateSuggestion}
+            >
+              Ναι, χρησιμοποίησε αυτή
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm btn-ghost"
+              onClick={dismissPlateSuggestion}
+            >
+              Όχι, κράτα «{plate}»
+            </button>
+          </div>
+        </div>
+      )}
+
       <label className="field-label">
         Πινακίδα (μπορείς να τη διορθώσεις):
         <input
           className="input"
           type="text"
           value={plate}
-          placeholder="π.χ. ΟΤΜ-776 ή ΑΒΓ-1234"
-          onChange={(e) => setPlate(e.target.value)}
+          placeholder="π.χ. OTM-776 ή ABH-1234"
+          onChange={(e) => {
+            setPlate(normalizePlateInput(e.target.value));
+            setPlateSuggestion(null);
+          }}
         />
       </label>
 
@@ -528,7 +648,18 @@ export default function CameraCapture({ onConfirm, disabled, isRental }) {
             {confidence < 50 ? " — χαμηλή, έλεγξε/διόρθωσε" : ""}
           </span>
           {rawText && <span className="muted small">Διάβασε: «{rawText}»</span>}
-          <span className="muted small">Μηχανή: {recognizerName}</span>
+          <span className="muted small">
+            Μηχανή: {engineUsed === "plate_recognizer" ? "ALPR" : "tesseract"}
+          </span>
+        </div>
+      )}
+
+      {/* Fallback ΑΛΠΡ -> Tesseract: ο χρήστης πρέπει να ξέρει ότι χρησιμοποιήθηκε
+          η λιγότερο ακριβής μηχανή, ώστε να ελέγξει το αποτέλεσμα πιο προσεκτικά. */}
+      {engineFallback && (
+        <div className="alert alert-error">
+          ⚠️ Το ALPR δεν ήταν διαθέσιμο — χρησιμοποιήθηκε το εναλλακτικό
+          tesseract (λιγότερο ακριβές). Έλεγξε προσεκτικά την πινακίδα.
         </div>
       )}
 

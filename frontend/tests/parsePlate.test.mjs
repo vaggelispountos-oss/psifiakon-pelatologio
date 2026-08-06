@@ -3,7 +3,11 @@
 // Τρέξιμο:  npm test    (ή: node --test tests/)
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parsePlate, parsePlateDetailed } from "../src/utils.js";
+import {
+  parsePlate,
+  parsePlateDetailed,
+  findClosestKnownPlate,
+} from "../src/utils.js";
 
 test("ΜΗΧΑΝΗ — 3 γράμματα + 3 ψηφία (ΟΤΜ-776)", () => {
   assert.equal(parsePlate("OTM 776"), "OTM-776");
@@ -22,14 +26,16 @@ test("ΜΗΧΑΝΗ — αγνοεί GR και το αυτοκόλλητο ΚΤΕ
   assert.equal(parsePlate("GR OTM 776"), "OTM-776");
 });
 
-test("ΜΗΧΑΝΗ — ελληνικοί χαρακτήρες", () => {
-  assert.equal(parsePlate("ΟΤΜ 776"), "ΟΤΜ-776");
+test("ΜΗΧΑΝΗ — ελληνικοί χαρακτήρες κανονικοποιούνται σε λατινικούς", () => {
+  // Η ΑΑΔΕ και η βάση περιμένουν ΠΑΝΤΑ λατινικά γράμματα — «ΟΤΜ» και «OTM»
+  // πρέπει να καταλήγουν στην ΙΔΙΑ πινακίδα, αλλιώς σπάει το matching πελάτη.
+  assert.equal(parsePlate("ΟΤΜ 776"), "OTM-776");
 });
 
-test("ΑΥΤΟΚΙΝΗΤΟ — 3 γράμματα + 4 ψηφία (ΑΒΓ-1234)", () => {
-  assert.equal(parsePlate("ABG 1234"), "ABG-1234");
-  assert.equal(parsePlate("ABG1234"), "ABG-1234");
-  assert.equal(parsePlate("plate: ΑΒΓ-1234 GR"), "ΑΒΓ-1234");
+test("ΑΥΤΟΚΙΝΗΤΟ — 3 γράμματα + 4 ψηφία (ABH-1234)", () => {
+  assert.equal(parsePlate("ABH 1234"), "ABH-1234");
+  assert.equal(parsePlate("ABH1234"), "ABH-1234");
+  assert.equal(parsePlate("plate: ΑΒΗ-1234 GR"), "ABH-1234");
 });
 
 test("ΘΟΡΥΒΟΣ — δεν βρίσκει πλάκα -> null", () => {
@@ -77,4 +83,29 @@ test("ΚΑΘΑΡΗ ΑΝΑΓΝΩΣΗ — δεν σημαδεύεται ως δι�
   assert.equal(res.plate, "IKX-1833");
   assert.equal(res.corrected, false);
   assert.deepEqual(res.warnings, []);
+});
+
+test("ΓΝΩΣΤΗ ΠΙΝΑΚΙΔΑ — προτείνει διόρθωση όταν διαφέρει 1 χαρακτήρα", () => {
+  const known = [{ plate: "IKX-1833", name: "Παπαδόπουλος" }];
+  assert.deepEqual(findClosestKnownPlate("IKX-1533", known), known[0]);
+  // Λειτουργεί ΚΑΙ όταν η γνωστή πινακίδα είναι αποθηκευμένη σε ελληνικά.
+  assert.deepEqual(
+    findClosestKnownPlate("IKX-1533", [{ plate: "ΙΚΧ-1833" }]),
+    { plate: "ΙΚΧ-1833" }
+  );
+});
+
+test("ΓΝΩΣΤΗ ΠΙΝΑΚΙΔΑ — καμία πρόταση αν ήδη ταιριάζει ακριβώς", () => {
+  const known = [{ plate: "IKX-1833" }];
+  assert.equal(findClosestKnownPlate("IKX-1833", known), null);
+  assert.equal(findClosestKnownPlate("ΙΚΧ-1833", known), null); // ίδια, ελληνικά
+});
+
+test("ΓΝΩΣΤΗ ΠΙΝΑΚΙΔΑ — καμία πρόταση αν η απόκλιση είναι μεγάλη ή ασαφής", () => {
+  const known = [{ plate: "IKX-1833" }];
+  assert.equal(findClosestKnownPlate("ABC-9999", known), null); // πολύ διαφορετική
+  assert.equal(findClosestKnownPlate("IKX-183", known), null); // διαφορετικό μήκος (μηχανή 3 ψηφία vs αυτοκίνητο 4) -> δεν συγκρίνεται καν
+  // Δύο εξίσου κοντινές -> ασαφές, μην μαντεύεις
+  const ambiguous = [{ plate: "IKX-1533" }, { plate: "IKX-1933" }];
+  assert.equal(findClosestKnownPlate("IKX-1833", ambiguous), null);
 });

@@ -16,6 +16,53 @@ const PLATE_LETTER_RE = new RegExp(
   `^[${PLATE_LETTERS_LATIN}${PLATE_LETTERS_GREEK}]+$`
 );
 
+// Η ΑΑΔΕ (vehicleRegistrationNumber) και η στήλη plate στη βάση περιμένουν
+// ΛΑΤΙΝΙΚΑ γράμματα. Το OCR/ο χρήστης μπορεί να δώσει είτε ελληνικά είτε
+// λατινικά (οπτικά ταυτόσημα) — χωρίς ενοποίηση σε ΜΙΑ κανονική μορφή, η
+// «ΙΚΧ-1833» και η «IKX-1833» θεωρούνται ΔΙΑΦΟΡΕΤΙΚΟΙ πελάτες (βλ. unique
+// constraint plate+workshop στο backend), σπάζοντας silently το matching.
+const GREEK_TO_LATIN = {};
+for (let i = 0; i < PLATE_LETTERS_GREEK.length; i++) {
+  GREEK_TO_LATIN[PLATE_LETTERS_GREEK[i]] = PLATE_LETTERS_LATIN[i];
+}
+
+/** Μετατρέπει κάθε ελληνικό γράμμα πινακίδας στο λατινικό αντίστοιχό του. */
+function toLatinLetters(str) {
+  let out = "";
+  for (const ch of str) out += GREEK_TO_LATIN[ch] || ch;
+  return out;
+}
+
+/**
+ * Κανονική μορφή πινακίδας: ΠΑΝΤΑ λατινικά γράμματα, uppercase, "XXX-9999".
+ * Εφαρμόζεται σε ΚΑΘΕ πηγή (OCR, χειροκίνητη πληκτρολόγηση) πριν αποθηκευτεί
+ * ή σταλεί οπουδήποτε, ώστε να υπάρχει ΜΙΑ αναπαράσταση ανά πινακίδα.
+ *
+ * @param {string} plate - ήδη σε μορφή "XXX-9999" (ελληνικά ή λατινικά)
+ * @returns {string}
+ */
+export function toCanonicalPlate(plate) {
+  if (!plate || typeof plate !== "string") return "";
+  return toLatinLetters(plate.trim().toUpperCase());
+}
+
+/**
+ * Καθαρίζει ελεύθερο χειροκίνητο input σε canonical μορφή, ΧΩΡΙΣ να απαιτεί
+ * ήδη τη μορφή "XXX-9999" (ο χρήστης μπορεί να τη γράψει χωρίς παύλα, με
+ * μικρά γράμματα, με κενά). Δεν επιβάλλει το σχήμα 3+3/3+4 — μόνο κανονικοποιεί
+ * χαρακτήρες, ώστε ο χρήστης να διατηρεί τον έλεγχο του πεδίου διόρθωσης.
+ *
+ * @param {string} raw
+ * @returns {string}
+ */
+export function normalizePlateInput(raw) {
+  if (!raw || typeof raw !== "string") return "";
+  const upper = toLatinLetters(raw.toUpperCase());
+  // Κράτα μόνο έγκυρους χαρακτήρες πινακίδας (λατινικά γράμματα πινακίδας,
+  // ψηφία, παύλα) — πέταξε τυχαία σημεία στίξης/σύμβολα από copy-paste.
+  return upper.replace(new RegExp(`[^${PLATE_LETTERS_LATIN}0-9-]`, "g"), "");
+}
+
 // Συχνές συγχύσεις OCR. Τις εφαρμόζουμε ΑΝΑ ΘΕΣΗ: η μορφή της πινακίδας
 // (3 γράμματα + 3-4 ψηφία) μας λέει τι περιμένουμε σε κάθε θέση, οπότε
 // διορθώνουμε στοχευμένα αντί να μαντεύουμε.
@@ -114,7 +161,7 @@ function matchSeparatedGroups(cleaned) {
   }
 
   return {
-    plate: `${letters}-${digits}`,
+    plate: `${toLatinLetters(letters)}-${digits}`,
     warnings,
     corrected: warnings.length > 0,
   };
@@ -187,12 +234,62 @@ export function parsePlateDetailed(ocrText) {
   if (!best) return empty;
 
   return {
-    plate: `${best.letters}-${best.digits}`,
+    plate: `${toLatinLetters(best.letters)}-${best.digits}`,
     warnings: [
       `το OCR δεν ξεχώρισε γράμματα/ψηφία («${best.raw}») — υπέθεσα τη μορφή`,
     ],
     corrected: true,
   };
+}
+
+/**
+ * Ψάχνει στις ΓΝΩΣΤΕΣ πινακίδες (πελάτες του συνεργείου) για μία που διαφέρει
+ * ΑΚΡΙΒΩΣ 1 χαρακτήρα από αυτή που διάβασε το OCR — π.χ. «IKX-1833» (OCR) vs
+ * «IKX-1533» (γνωστός πελάτης). Δεν είναι OCR correction μέσω κανόνων (όπως
+ * το TO_LETTER/TO_DIGIT πιο πάνω) αλλά αξιοποίηση δεδομένων: αν ο πελάτης
+ * έχει ξαναέρθει, η ΠΙΟ ΠΙΘΑΝΗ εξήγηση μιας μικρής απόκλισης είναι λάθος
+ * ανάγνωση, όχι νέο όχημα με σχεδόν ίδια πινακίδα.
+ *
+ * Επιστρέφει null αν:
+ *   - η πινακίδα ΗΔΗ ταιριάζει ακριβώς με γνωστή (καμία διόρθωση χρειάζεται)
+ *   - καμία γνωστή πινακίδα δεν είναι αρκετά κοντά
+ *   - ΠΑΝΩ ΑΠΟ ΜΙΑ γνωστές πινακίδες είναι εξίσου κοντά (ασαφές -> δεν
+ *     μαντεύουμε, ο χρήστης έχει το πεδίο διόρθωσης)
+ *
+ * @param {string} plate - πινακίδα σε μορφή "XXX-999" (π.χ. αποτέλεσμα OCR)
+ * @param {Array<{plate: string}>} knownPlates
+ * @param {{maxDistance?: number}} [opts]
+ * @returns {{plate: string}|null} το αντικείμενο από το knownPlates που ταιριάζει
+ */
+export function findClosestKnownPlate(plate, knownPlates, { maxDistance = 1 } = {}) {
+  const target = toCanonicalPlate(plate).replace(/-/g, "");
+  if (!target || !Array.isArray(knownPlates) || !knownPlates.length) return null;
+
+  let best = null;
+  let bestDist = Infinity;
+  let ambiguous = false;
+
+  for (const known of knownPlates) {
+    const candidate = toCanonicalPlate(known.plate || "").replace(/-/g, "");
+    if (!candidate || candidate.length !== target.length) continue;
+    if (candidate === target) return null; // ήδη γνωστή, ακριβής — καμία πρόταση
+
+    let dist = 0;
+    for (let i = 0; i < candidate.length; i++) {
+      if (candidate[i] !== target[i]) dist++;
+    }
+
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = known;
+      ambiguous = false;
+    } else if (dist === bestDist) {
+      ambiguous = true;
+    }
+  }
+
+  if (best && !ambiguous && bestDist > 0 && bestDist <= maxDistance) return best;
+  return null;
 }
 
 /**

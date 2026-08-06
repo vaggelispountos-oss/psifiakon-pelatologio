@@ -11,6 +11,10 @@ import {
   testConnection,
   setAadeLiveMode,
 } from "../services/api";
+import {
+  getOcrEnginePreference,
+  setOcrEnginePreference,
+} from "../services/plateRecognizer";
 import Accordion from "./Accordion";
 import HelpKnowledgeBase from "./HelpKnowledgeBase";
 import ContactSupport from "./ContactSupport";
@@ -310,6 +314,50 @@ export default function SettingsPanel({ onSaved }) {
   );
 }
 
+// Ρύθμιση engine αναγνώρισης πινακίδας. Τοπική (ανά συσκευή, localStorage)
+// γιατί είναι θέμα δικτύου/απορρήτου της ΣΥΓΚΕΚΡΙΜΕΝΗΣ συσκευής/χρήστη, όχι
+// tenant-wide πολιτική — δες services/plateRecognizer/index.js.
+function OcrEngineSettings() {
+  const [pref, setPref] = useState(getOcrEnginePreference());
+
+  function choose(next) {
+    setOcrEnginePreference(next);
+    setPref(next);
+  }
+
+  return (
+    <div className="settings-form">
+      <div className="alert alert-info">
+        Το <b>ALPR</b> (Plate Recognizer) είναι εξειδικευμένο σε πινακίδες και
+        ΠΟΛΥ πιο ακριβές από το δωρεάν Tesseract — αλλά στέλνει την εικόνα της
+        πινακίδας σε εξωτερικό server. Στη λειτουργία «Αυτόματο», αν το ALPR
+        δεν είναι διαθέσιμο (χωρίς δίκτυο, όριο χρήσης) γίνεται αυτόματη
+        επιστροφή στο Tesseract (τοπικά, χωρίς αποστολή εικόνας πουθενά).
+      </div>
+
+      <label className="field-label field-checkbox">
+        <input
+          type="radio"
+          name="ocr-engine"
+          checked={pref === "auto"}
+          onChange={() => choose("auto")}
+        />
+        Αυτόματο — ALPR πρώτα, Tesseract αν χρειαστεί (προτεινόμενο)
+      </label>
+      <label className="field-label field-checkbox">
+        <input
+          type="radio"
+          name="ocr-engine"
+          checked={pref === "tesseract"}
+          onChange={() => choose("tesseract")}
+        />
+        Μόνο Tesseract — καμία εικόνα δεν στέλνεται εκτός συσκευής (λιγότερο
+        ακριβές)
+      </label>
+    </div>
+  );
+}
+
 // Accordion με ΟΛΗ την οθόνη Ρυθμίσεων — μόνο μία ενότητα ανοιχτή τη φορά
 // ώστε να μην πιάνουν πολύ χώρο οι κάρτες. Σειρά (ζητήθηκε ρητά):
 // Οδηγός Σφαλμάτων πάνω-πάνω, Ρυθμίσεις ΑΑΔΕ κάτω-κάτω.
@@ -343,6 +391,11 @@ export function SettingsAccordion({ onSaved, onLogout, workshop, onWorkshopUpdat
               <InstallAppPrompt />
             </div>
           ),
+        },
+        {
+          id: "ocr",
+          title: "Αναγνώριση Πινακίδας (OCR)",
+          render: () => <OcrEngineSettings />,
         },
         { id: "aade", title: "Ρυθμίσεις ΑΑΔΕ", render: () => <SettingsPanel onSaved={onSaved} /> },
       ]}
