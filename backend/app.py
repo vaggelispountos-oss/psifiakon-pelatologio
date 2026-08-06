@@ -693,6 +693,21 @@ def register_routes(app):
                 "'reasonNonIssueType' (αιτιολογία μη έκδοσης)."
             )
 
+        # Οι κατηγορίες 4 (Δωρεάν), 6 (Εγγύηση) και 9 (Ιδιόχρηση) δεν οδηγούν
+        # ΠΟΤΕ σε παραστατικό — αν επιλέχθηκαν στον 2ο Χρόνο, η Ολοκλήρωση
+        # πρέπει να δηλώσει "Δεν εκδίδεται παραστατικό", αλλιώς η ΑΑΔΕ
+        # απορρίπτει με το ίδιο business error 203 που είδαμε στον 2ο Χρόνο.
+        if (
+            not is_rental
+            and entry.provided_service_category in (4, 6, 9)
+            and invoice_kind is not None
+        ):
+            raise ApiError(
+                "Η κατηγορία υπηρεσίας που επιλέχθηκε (Δωρεάν/Εγγύηση/Ιδιόχρηση) "
+                "δεν εκδίδει παραστατικό — επίλεξε «Δεν εκδίδεται παραστατικό» "
+                "αντί για είδος παραστατικού."
+            )
+
         if invoice_kind is not None:
             entry.invoice_kind = _parse_int(invoice_kind, "invoiceKind")
 
