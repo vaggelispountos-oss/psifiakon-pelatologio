@@ -4,9 +4,13 @@
 // Κάθε όχημα είναι ΑΝΕΞΑΡΤΗΤΟ (δικό του idDcl + status) — κάθε ενέργεια
 // αναφέρεται ρητά στο entry_id του. Δεν υπάρχει «τρέχον όχημα» global state.
 // --------------------------------------------------------------------
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { STATUS_LABELS, STATUS_LABELS_RENTAL } from "../constants";
 import { reconcileEntry } from "../services/api";
+
+// Καταστάσεις που η ΑΑΔΕ θεωρεί ήδη οριστικές — δεν χρειάζεται να τις
+// ξαναρωτάμε σε κάθε άνοιγμα του tab.
+const AUTOSYNC_SKIP_STATUSES = new Set(["cancelled", "correlated"]);
 
 // Επόμενο βήμα ανά status. Ενοικιάσεις δεν έχουν 2ο Χρόνο — από "open" πάνε
 // κατευθείαν σε Ολοκλήρωση.
@@ -63,6 +67,7 @@ export default function EntriesList({
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [recon, setRecon] = useState({}); // {entryId: {loading, result}}
+  const [autoSyncing, setAutoSyncing] = useState(false);
 
   // Μετρητές ανά στάδιο
   const counts = useMemo(() => {
@@ -80,19 +85,52 @@ export default function EntriesList({
     });
   }, [entries, filter, search]);
 
-  async function handleReconcile(entry) {
+  // Κάνει reconcile ΕΝΑ entry· επιστρέφει true αν άλλαξε κάτι τοπικά.
+  // Δεν καλεί onRefresh() μόνο του — το auto-sync το κάνει ΜΙΑ φορά στο
+  // τέλος για όλα, ώστε να μη γίνονται πολλαπλά ταυτόχρονα refresh.
+  async function doReconcile(entry) {
     setRecon((r) => ({ ...r, [entry.id]: { loading: true } }));
     try {
       const result = await reconcileEntry(entry.id);
       setRecon((r) => ({ ...r, [entry.id]: { loading: false, result } }));
-      if (result.updated && result.updated.length > 0) onRefresh();
+      return !!(result.updated && result.updated.length > 0);
     } catch (err) {
       setRecon((r) => ({
         ...r,
         [entry.id]: { loading: false, result: { ok: false, reason: err.message } },
       }));
+      return false;
     }
   }
+
+  async function handleReconcile(entry) {
+    const changed = await doReconcile(entry);
+    if (changed) onRefresh();
+  }
+
+  // Αυτόματος συγχρονισμός ΜΙΑ φορά κάθε φορά που ανοίγει το tab
+  // «Εγγραφές» — πιάνει αλλαγές που έγιναν αλλού (π.χ. απευθείας στο
+  // back-office της ΑΑΔΕ ή από λογισμικό λογιστή) χωρίς να χρειάζεται
+  // χειροκίνητο «Έλεγχος με ΑΑΔΕ» ανά εγγραφή.
+  const autoSyncedRef = useRef(false);
+  useEffect(() => {
+    if (autoSyncedRef.current || loading) return;
+    if (!entries || entries.length === 0) return;
+    autoSyncedRef.current = true;
+
+    const toSync = entries.filter(
+      (e) => e.idDcl && !AUTOSYNC_SKIP_STATUSES.has(e.status)
+    );
+    if (toSync.length === 0) return;
+
+    setAutoSyncing(true);
+    Promise.all(toSync.map(doReconcile))
+      .then((results) => {
+        if (results.some(Boolean)) onRefresh();
+      })
+      .finally(() => setAutoSyncing(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entries, loading]);
 
   function reconLine(entry) {
     const st = recon[entry.id];
@@ -126,6 +164,14 @@ export default function EntriesList({
         κουμπί για το επόμενο βήμα. (Για ιστορικό ή στατιστικά ανά πελάτη,
         δες τα tabs «Πελάτες» και «Ιστορικό».)
       </p>
+
+      {autoSyncing && (
+        <div className="alert alert-info small">
+          <span className="spinner" aria-label="συγχρονισμός" /> Συγχρονισμός
+          με ΑΑΔΕ… (πιάνει αλλαγές που έγιναν από αλλού, π.χ. λογιστικό
+          λογισμικό ή απευθείας στην ΑΑΔΕ)
+        </div>
+      )}
 
       {onNewVehicle && (
         <button className="btn btn-primary btn-block" onClick={onNewVehicle}>
