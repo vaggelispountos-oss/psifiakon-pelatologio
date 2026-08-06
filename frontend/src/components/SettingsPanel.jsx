@@ -5,7 +5,12 @@
 // δείχνουμε placeholder και το αφήνουμε κενό ώστε να μην αλλάξει.
 // --------------------------------------------------------------------
 import { useEffect, useState } from "react";
-import { getSettings, updateSettings, testConnection } from "../services/api";
+import {
+  getSettings,
+  updateSettings,
+  testConnection,
+  setAadeLiveMode,
+} from "../services/api";
 import Accordion from "./Accordion";
 import HelpKnowledgeBase from "./HelpKnowledgeBase";
 import ContactSupport from "./ContactSupport";
@@ -27,6 +32,8 @@ export default function SettingsPanel({ onSaved }) {
 
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null); // {ok, message/reason}
+
+  const [switchingLive, setSwitchingLive] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -86,7 +93,55 @@ export default function SettingsPanel({ onSaved }) {
     }
   }
 
+  async function handleGoLive() {
+    if (
+      !window.confirm(
+        "Ενεργοποίηση πραγματικής σύνδεσης με την ΑΑΔΕ;\n\n" +
+          "Από εδώ και πέρα κάθε νέα εγγραφή θα καταχωρείται ΠΡΑΓΜΑΤΙΚΑ στο " +
+          "Ψηφιακό Πελατολόγιο (myDATA) — δεν θα είναι πλέον δοκιμαστική."
+      )
+    ) {
+      return;
+    }
+    setSwitchingLive(true);
+    setError("");
+    setOk("");
+    try {
+      const s = await setAadeLiveMode(true);
+      setStatus(s);
+      setOk("Η πραγματική σύνδεση με την ΑΑΔΕ ενεργοποιήθηκε.");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSwitchingLive(false);
+    }
+  }
+
+  async function handleGoMock() {
+    if (
+      !window.confirm(
+        "Επιστροφή σε δοκιμαστική λειτουργία (mock); Οι νέες εγγραφές δεν θα " +
+          "στέλνονται πλέον πραγματικά στην ΑΑΔΕ."
+      )
+    ) {
+      return;
+    }
+    setSwitchingLive(true);
+    setError("");
+    setOk("");
+    try {
+      const s = await setAadeLiveMode(false);
+      setStatus(s);
+      setOk("Επιστροφή σε δοκιμαστική λειτουργία (mock).");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSwitchingLive(false);
+    }
+  }
+
   const hasKey = status?.has_key;
+  const isLive = status?.force_real_aade;
 
   return (
     <div className="settings-form">
@@ -113,6 +168,45 @@ export default function SettingsPanel({ onSaved }) {
               απενεργοποιημένη μέχρι να τους συμπληρώσεις.
             </div>
           )}
+
+          {/* Live/Mock switch */}
+          <div className="alert alert-info">
+            {isLive ? (
+              <>
+                🟢 <b>Live</b> — οι εγγραφές στέλνονται πραγματικά στην ΑΑΔΕ
+                (Ψηφιακό Πελατολόγιο).
+              </>
+            ) : (
+              <>
+                🧪 <b>Δοκιμαστική λειτουργία (mock)</b> — οι εγγραφές ΔΕΝ
+                στέλνονται στην ΑΑΔΕ, δεν θα τις δεις στο myDATA.
+              </>
+            )}
+          </div>
+          <div className="test-conn">
+            {isLive ? (
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={handleGoMock}
+                disabled={switchingLive}
+              >
+                {switchingLive ? "…" : "↩️ Επιστροφή σε δοκιμαστική λειτουργία"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={handleGoLive}
+                disabled={switchingLive || !hasKey}
+              >
+                {switchingLive ? "…" : "🚀 Ενεργοποίηση πραγματικής ΑΑΔΕ (live)"}
+              </button>
+            )}
+            {!hasKey && (
+              <span className="muted small">όρισε πρώτα κωδικούς</span>
+            )}
+          </div>
 
           {/* Έλεγχος σύνδεσης */}
           <div className="test-conn">

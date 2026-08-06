@@ -451,8 +451,10 @@ def register_routes(app):
         if not settings.has_key or not settings.aade_username:
             return jsonify({"ok": False, "reason": "Όρισε πρώτα κωδικούς ΑΑΔΕ."})
 
-        # Σεβασμός mock/real switch: σε mock δεν γίνεται πραγματική κλήση.
-        if current_app.config["USE_MOCK_AADE"]:
+        # Σεβασμός mock/real switch (ίδια λογική με _build_aade: το per-workshop
+        # force_real_aade υπερισχύει του global USE_MOCK_AADE).
+        use_mock = current_app.config["USE_MOCK_AADE"] and not settings.force_real_aade
+        if use_mock:
             return jsonify(
                 {"ok": True, "message": "Mock mode — δεν έγινε πραγματική κλήση"}
             )
@@ -468,6 +470,25 @@ def register_routes(app):
         if "error" in res:
             return jsonify({"ok": False, "reason": res["error"]})
         return jsonify({"ok": True, "message": "Σύνδεση επιτυχής"})
+
+    # ----------------------------------------------------------------
+    # Live/Mock switch — αυτοεξυπηρέτηση από τον χρήστη (workshop-scoped).
+    # Ίδιο flag με το admin-only /api/admin/.../aade-mode, ώστε ο χρήστης
+    # να μπορεί να ενεργοποιήσει πραγματική ΑΑΔΕ χωρίς admin key.
+    # ----------------------------------------------------------------
+    @app.route("/api/settings/aade-mode", methods=["PUT"])
+    @require_auth
+    def set_own_aade_mode():
+        settings = _get_settings()
+        if not settings.has_key or not settings.aade_username:
+            raise ApiError(
+                "Όρισε πρώτα τους κωδικούς ΑΑΔΕ πριν ενεργοποιήσεις πραγματική λειτουργία.",
+                400,
+            )
+        data = request.get_json(silent=True) or {}
+        settings.force_real_aade = bool(data.get("forceReal"))
+        db.session.commit()
+        return jsonify(settings.to_dict())
 
     # ----------------------------------------------------------------
     # 1ος ΧΡΟΝΟΣ — SendClient

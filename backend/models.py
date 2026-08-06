@@ -286,8 +286,9 @@ class Settings(db.Model):
     # Per-workshop override: True -> χρησιμοποίησε ΠΡΑΓΜΑΤΙΚΗ ΑΑΔΕ για ΑΥΤΟ
     # το workshop ακόμη κι όταν το global USE_MOCK_AADE=true (δες
     # app._build_aade). Επιτρέπει ένα πρώτο πραγματικό τεστ χωρίς να αλλάξει
-    # συμπεριφορά για όλους τους υπόλοιπους tenants. Αλλάζει ΜΟΝΟ μέσω
-    # /api/admin (require_admin) — δεν εκτίθεται στον πελάτη.
+    # συμπεριφορά για όλους τους υπόλοιπους tenants. Αλλάζει μέσω
+    # /api/admin (require_admin) ή αυτοεξυπηρέτησης από τον ίδιο τον χρήστη
+    # στο PUT /api/settings/aade-mode (δες app.py, require_auth).
     force_real_aade = db.Column(db.Boolean, nullable=True)
     updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
 
@@ -312,6 +313,7 @@ class Settings(db.Model):
             "has_key": self.has_key,
             "masked_key": mask_key(self.aade_subscription_key),
             "installation_id": self.installation_id,
+            "force_real_aade": bool(self.force_real_aade),
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
 

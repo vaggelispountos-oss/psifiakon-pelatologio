@@ -247,6 +247,14 @@ export function testConnection() {
   return request("/api/settings/test-connection", { method: "POST" });
 }
 
+// Live/Mock switch — ενεργοποίηση πραγματικής ΑΑΔΕ για το δικό μας workshop
+export function setAadeLiveMode(forceReal) {
+  return request("/api/settings/aade-mode", {
+    method: "PUT",
+    body: { forceReal },
+  });
+}
+
 // Reconciliation — σύγκριση τοπικής εγγραφής με την ΑΑΔΕ
 export function reconcileEntry(entry_id) {
   return request(`/api/dcl/reconcile/${entry_id}`);
