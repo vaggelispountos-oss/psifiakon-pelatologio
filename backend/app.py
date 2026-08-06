@@ -1177,13 +1177,27 @@ def register_routes(app):
             )
         aade = _build_aade(settings)
 
-        dclid = (
-            int(entry.id_dcl)
-            if (entry.id_dcl and str(entry.id_dcl).isdigit())
-            else 1
+        # ΠΡΟΣΟΧΗ: το dclid της RequestClients ΔΕΝ είναι "δώσε μου αυτή την
+        # εγγραφή" — είναι cursor: επιστρέφει εγγραφές με DCLID > dclid (ίδια
+        # λογική με το mark streaming στα τιμολόγια myDATA). Αν στείλουμε το
+        # ίδιο id_dcl της εγγραφής, ζητάμε ό,τι είναι ΜΕΤΑ από αυτήν και ποτέ
+        # δεν την βρίσκουμε. Γι' αυτό ζητάμε [id_dcl - 1, id_dcl] — το στενό
+        # εύρος γύρω ΑΚΡΙΒΩΣ από τη συγκεκριμένη εγγραφή.
+        if entry.id_dcl and str(entry.id_dcl).isdigit():
+            target_id = int(entry.id_dcl)
+            dclid = max(target_id - 1, 1)
+            max_dclid = target_id
+        else:
+            dclid = 1
+            max_dclid = None
+        res = aade.request_clients(dclid=dclid, max_dclid=max_dclid)
+        _log_aade(
+            entry.id,
+            "RequestClients",
+            {"dclid": dclid, "max_dclid": max_dclid},
+            res,
+            "error" not in res,
         )
-        res = aade.request_clients(dclid=dclid)
-        _log_aade(entry.id, "RequestClients", {"dclid": dclid}, res, "error" not in res)
 
         if "error" in res:
             db.session.commit()
