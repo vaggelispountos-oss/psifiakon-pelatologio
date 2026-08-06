@@ -276,7 +276,9 @@ def _extract_aade_record(requested_doc, id_dcl):
     """
     Βρίσκει στο parsed RequestedDoc τον DigitalClient με το δοσμένο idDcl και
     επιστρέφει τα αυθεντικά στοιχεία (creationDateTime από InitialClientData,
-    completionDateTime από UpdatedClientData).
+    τα υπόλοιπα από UpdatedClientData) — η ΑΑΔΕ είναι πάντα η πηγή αλήθειας,
+    ανεξάρτητα από ΠΟΙΟ λογισμικό (το δικό μας ή π.χ. αυτό του λογιστή)
+    έστειλε την τελευταία ενημέρωση.
     """
     for client in requested_doc.get("clients", []) or []:
         init = client.get("InitialClientData", {}) or {}
@@ -287,8 +289,32 @@ def _extract_aade_record(requested_doc, id_dcl):
                 "creationDateTime": init.get("creationDateTime"),
                 "completionDateTime": upd.get("completionDateTime"),
                 "providedServiceCategory": upd.get("providedServiceCategory"),
+                "providedServiceCategoryOther": upd.get("providedServiceCategoryOther"),
+                "invoiceKind": upd.get("invoiceKind"),
                 "entryCompletion": upd.get("entryCompletion"),
             }
+    return None
+
+
+def _as_list(val):
+    """Το _elem_to_dict δίνει string για ένα στοιχείο, list για πολλά — ενοποίηση."""
+    if val is None:
+        return []
+    return val if isinstance(val, list) else [val]
+
+
+def _find_cancellation(requested_doc, id_dcl):
+    for c in requested_doc.get("cancellations", []) or []:
+        if str(c.get("dclid")) == str(id_dcl):
+            return c
+    return None
+
+
+def _find_correlation(requested_doc, id_dcl):
+    for c in requested_doc.get("correlations", []) or []:
+        ids = [str(x) for x in _as_list(c.get("correlatedDCLids"))]
+        if str(id_dcl) in ids:
+            return c
     return None
 
 
@@ -1130,8 +1156,10 @@ def register_routes(app):
             "mark": entry.mark,
         }
 
-        # Σεβασμός mock/real switch — σε mock δεν σκάει, απλώς δεν συγκρίνει.
-        if current_app.config["USE_MOCK_AADE"]:
+        # Σεβασμός mock/real switch (ίδια λογική με _build_aade/test-connection).
+        settings = _get_settings()
+        use_mock = current_app.config["USE_MOCK_AADE"] and not settings.force_real_aade
+        if use_mock:
             return jsonify(
                 {
                     "ok": True,
@@ -1143,7 +1171,10 @@ def register_routes(app):
                 }
             )
 
-        settings = _require_credentials()
+        if not settings.has_key or not settings.aade_username:
+            raise ApiError(
+                "Δεν έχουν οριστεί οι κωδικοί ΑΑΔΕ — πήγαινε στις Ρυθμίσεις.", 400
+            )
         aade = _build_aade(settings)
 
         dclid = (
@@ -1171,17 +1202,63 @@ def register_routes(app):
                 }
             )
 
-        # Ενημέρωση τοπικής εγγραφής με τους ΑΥΘΕΝΤΙΚΟΥΣ χρόνους της ΑΑΔΕ
-        # (αντικαθιστά το προσωρινό local UTC που είχε μπει).
+        # Ενημέρωση τοπικής εγγραφής με τα ΑΥΘΕΝΤΙΚΑ στοιχεία της ΑΑΔΕ —
+        # πηγή αλήθειας, ό,τι κι αν το ενημέρωσε (εμάς, λογιστικό λογισμικό
+        # που κάνει ClientCorrelations/CancelClient με τα ίδια στοιχεία κ.λπ.).
         updated = []
         c_dt = _parse_aade_dt(aade_rec.get("creationDateTime"))
-        if c_dt is not None:
+        if c_dt is not None and c_dt != entry.creation_date_time:
             entry.creation_date_time = c_dt
             updated.append("creationDateTime")
         comp_dt = _parse_aade_dt(aade_rec.get("completionDateTime"))
-        if comp_dt is not None:
+        if comp_dt is not None and comp_dt != entry.completion_date_time:
             entry.completion_date_time = comp_dt
             updated.append("completionDateTime")
+
+        category = aade_rec.get("providedServiceCategory")
+        if category not in (None, "") and _parse_int(category, "providedServiceCategory") != entry.provided_service_category:
+            entry.provided_service_category = _parse_int(category, "providedServiceCategory")
+            updated.append("providedServiceCategory")
+        other = aade_rec.get("providedServiceCategoryOther")
+        if other and other != entry.provided_service_category_other:
+            entry.provided_service_category_other = other
+            updated.append("providedServiceCategoryOther")
+        invoice_kind = aade_rec.get("invoiceKind")
+        if invoice_kind not in (None, "") and _parse_int(invoice_kind, "invoiceKind") != entry.invoice_kind:
+            entry.invoice_kind = _parse_int(invoice_kind, "invoiceKind")
+            updated.append("invoiceKind")
+
+        cancellation = _find_cancellation(res, entry.id_dcl)
+        correlation = _find_correlation(res, entry.id_dcl)
+
+        # Ιεράρχηση τελικής κατάστασης: ακύρωση > συσχέτιση ΜΑΡΚ > ολοκλήρωση
+        # > σε εξέλιξη (2ος Χρόνος) > ανοιχτή. Η ΑΑΔΕ υπερισχύει πάντα της
+        # τοπικής κατάστασης — μπορεί να έχει προχωρήσει από άλλο λογισμικό.
+        if cancellation is not None:
+            new_status = "cancelled"
+        elif correlation is not None:
+            new_status = "correlated"
+        elif str(aade_rec.get("entryCompletion")).lower() == "true":
+            new_status = "completed"
+        elif category not in (None, ""):
+            new_status = "in_progress"
+        else:
+            new_status = entry.status  # δεν έχει προχωρήσει ακόμα στην ΑΑΔΕ
+
+        if new_status != entry.status:
+            entry.status = new_status
+            updated.append("status")
+
+        if correlation is not None:
+            mark = correlation.get("mark")
+            if mark and mark != entry.mark:
+                entry.mark = mark
+                updated.append("mark")
+            correlate_id = correlation.get("correlateId")
+            if correlate_id and correlate_id != entry.correlate_id:
+                entry.correlate_id = correlate_id
+                updated.append("correlateId")
+
         db.session.commit()
 
         matches = {"idDcl": str(aade_rec.get("idDcl")) == str(entry.id_dcl)}

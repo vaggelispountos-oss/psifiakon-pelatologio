@@ -20,6 +20,18 @@ const NEXT_ACTION_RENTAL = {
   open: { label: "Ολοκλήρωση", stage: "exit" },
 };
 
+// Ελληνικά labels για το τι άλλαξε στο "Έλεγχος με ΑΑΔΕ" (reconcile)
+const RECON_FIELD_LABELS = {
+  creationDateTime: "ώρα δημιουργίας",
+  completionDateTime: "ώρα ολοκλήρωσης",
+  providedServiceCategory: "κατηγορία υπηρεσίας",
+  providedServiceCategoryOther: "περιγραφή κατηγορίας",
+  invoiceKind: "είδος παραστατικού",
+  status: "κατάσταση",
+  mark: "ΜΑΡΚ",
+  correlateId: "συσχέτιση",
+};
+
 // Φίλτρα σταδίων
 const FILTERS = [
   { id: "all", label: "Όλα" },
@@ -90,11 +102,12 @@ export default function EntriesList({
     if (r.mock) return <span className="muted small">ℹ️ {r.message}</span>;
     if (!r.ok) return <span className="conn-fail small">❌ {r.reason}</span>;
     const matched = r.matches && r.matches.idDcl;
+    const updatedLabels = (r.updated || []).map((f) => RECON_FIELD_LABELS[f] || f);
     return (
       <span className="conn-ok small">
         ✅ Ταιριάζει με ΑΑΔΕ{matched ? "" : " (μερικώς)"}
-        {r.updated && r.updated.length > 0
-          ? ` · ενημερώθηκαν: ${r.updated.join(", ")}`
+        {updatedLabels.length > 0
+          ? ` · ενημερώθηκε από ΑΑΔΕ: ${updatedLabels.join(", ")}`
           : ""}
       </span>
     );
