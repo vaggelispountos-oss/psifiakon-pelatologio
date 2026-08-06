@@ -16,6 +16,8 @@ services:
           property: connectionString
       - key: JWT_SECRET_KEY
         generateValue: true
+      - key: ENCRYPTION_KEY
+        generateValue: true
       - key: ADMIN_KEY
         generateValue: true
       - key: USE_MOCK_AADE

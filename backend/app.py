@@ -24,7 +24,7 @@ from flask_cors import CORS
 from sqlalchemy import inspect, text
 
 from auth import init_auth, require_auth
-from config import Config
+from config import Config, validate_production_config
 from models import AadeLog, Customer, DclEntry, OcrMetric, Settings, Workshop, db, utcnow
 
 # --------------------------------------------------------------------
@@ -41,13 +41,8 @@ def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
 
-    if app.config["FLASK_ENV"] != "development":
-        if app.config["JWT_SECRET_KEY"] == "dev-insecure-secret-change-me":
-            app.logger.warning(
-                "JWT_SECRET_KEY δεν έχει οριστεί ρητά σε production — "
-                "ΟΛΑ τα tokens γίνονται μη έγκυρα σε κάθε restart. Όρισε το "
-                "στα env vars."
-            )
+    if app.config["FLASK_ENV"] == "production":
+        validate_production_config()
 
     # CORS: με τον Vite proxy (single tunnel) δεν χτυπιέται καθόλου CORS, γιατί
     # ο browser μιλά μόνο στο origin του frontend. Default "*" (βολικό για

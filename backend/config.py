@@ -51,7 +51,8 @@ class Config:
     # --- Auth (multi-tenant) ---
     # ΥΠΟΧΡΕΩΤΙΚΟ να οριστεί ρητά σε production (.env) — το default εδώ είναι
     # ΜΟΝΟ για τοπική ανάπτυξη, ώστε να μη σκάει σε πρώτη εκκίνηση χωρίς .env.
-    JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-insecure-secret-change-me")
+    _DEV_JWT_SECRET = "dev-insecure-secret-change-me"
+    JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", _DEV_JWT_SECRET)
     # Access token: ζει λίγο. Refresh token: ζει πολύ — ανανεώνει το access.
     JWT_ACCESS_TOKEN_EXPIRES_MIN = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRES_MIN", "60"))
     JWT_REFRESH_TOKEN_EXPIRES_DAYS = int(
@@ -91,6 +92,15 @@ class Config:
     # Περιορισμός σε ελληνικές πινακίδες — ανεβάζει αισθητά την ακρίβεια.
     PLATE_RECOGNIZER_REGIONS = os.getenv("PLATE_RECOGNIZER_REGIONS", "gr")
 
+    # --- Κρυπτογράφηση ευαίσθητων στηλών στη βάση (aade_subscription_key) ---
+    # Fernet key (32 bytes urlsafe-base64), π.χ. `python -c "from
+    # cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
+    # ΥΠΟΧΡΕΩΤΙΚΟ να οριστεί ρητά σε production. Χωρίς αυτό στο dev, παράγεται
+    # ένα προσωρινό κλειδί ΣΤΗ ΜΝΗΜΗ σε κάθε εκκίνηση — προηγούμενα
+    # κρυπτογραφημένα δεδομένα γίνονται μη αναγνώσιμα μετά από restart, οπότε
+    # ΜΗΝ το αφήνεις έτσι πέρα από τοπική δοκιμή.
+    ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", "").strip()
+
     # --- Telemetry OCR (προαιρετικό) ---
     # Αν TELEMETRY_URL οριστεί, ΚΑΘΕ μετρική OCR (κάθε σάρωση πινακίδας)
     # προωθείται ΚΑΙ σε αυτό το URL — τυπικά τον δικό σου κεντρικό server
@@ -102,3 +112,29 @@ class Config:
     # Κοινό μυστικό ανάμεσα σε ΟΛΕΣ τις εγκαταστάσεις και τον server σου —
     # πρέπει να ταιριάζει με το INGEST_KEY του telemetry-server.
     TELEMETRY_KEY = os.getenv("TELEMETRY_KEY", "").strip()
+
+
+def validate_production_config(config=Config):
+    """
+    Σκάει νωρίς (στην εκκίνηση) αν λείπουν κρίσιμα μυστικά σε production, αντί
+    να τρέξει η εφαρμογή με ανασφαλή defaults (κοινό JWT secret, κλειδιά ΑΑΔΕ
+    χωρίς πραγματική κρυπτογράφηση). Καλείται από το app.py μόνο όταν
+    FLASK_ENV == "production".
+    """
+    problems = []
+    if config.JWT_SECRET_KEY == config._DEV_JWT_SECRET:
+        problems.append(
+            "JWT_SECRET_KEY δεν έχει οριστεί (χρησιμοποιείται το ανασφαλές "
+            "dev default) — όρισέ το στο .env."
+        )
+    if not config.ENCRYPTION_KEY:
+        problems.append(
+            "ENCRYPTION_KEY δεν έχει οριστεί — το aade_subscription_key θα "
+            "κρυπτογραφείται με προσωρινό κλειδί που χάνεται σε κάθε restart. "
+            "Όρισέ το στο .env (python -c \"from cryptography.fernet import "
+            "Fernet; print(Fernet.generate_key().decode())\")."
+        )
+    if problems:
+        raise RuntimeError(
+            "Μη ασφαλής ρύθμιση production:\n- " + "\n- ".join(problems)
+        )

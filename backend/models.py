@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import check_password_hash, generate_password_hash
 
+import crypto
+
 db = SQLAlchemy()
 
 
@@ -257,10 +259,13 @@ class Settings(db.Model):
         index=True,
     )
     aade_username = db.Column(db.String(255), nullable=True)  # «Όνομα Χρήστη»
-    # TODO (production): το subscription key ΠΡΕΠΕΙ να κρυπτογραφείται στη βάση
-    # (encryption at rest) και να μη γυρνάει ποτέ ολόκληρο στο frontend.
-    # Για το MVP απλή αποθήκευση.
-    aade_subscription_key = db.Column(db.String(255), nullable=True)
+    # Κρυπτογραφημένο στη βάση (Fernet, δες crypto.py) — ΠΟΤΕ δεν αποθηκεύεται
+    # plaintext. Πρόσβαση μέσω του property `aade_subscription_key` παρακάτω,
+    # που κρυπτογραφεί/αποκρυπτογραφεί διαφανώς· ο υπόλοιπος κώδικας
+    # (app.py) το διαβάζει/γράφει σαν κανονικό string attribute.
+    _aade_subscription_key_enc = db.Column(
+        "aade_subscription_key", db.String(512), nullable=True
+    )
     branch = db.Column(db.Integer, default=0, nullable=False)  # αρ. εγκατάστασης
     # ΑΦΜ υπόχρεης οντότητας — μόνο όταν διαβιβάζει λογιστής για λογαριασμό πελάτη
     entity_vat_number = db.Column(db.String(20), nullable=True)
@@ -271,6 +276,14 @@ class Settings(db.Model):
     # ΔΕΝ ταυτοποιεί προσωπικά δεδομένα πελάτη του συνεργείου.
     installation_id = db.Column(db.String(32), nullable=True)
     updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
+
+    @property
+    def aade_subscription_key(self):
+        return crypto.decrypt(self._aade_subscription_key_enc)
+
+    @aade_subscription_key.setter
+    def aade_subscription_key(self, value):
+        self._aade_subscription_key_enc = crypto.encrypt(value)
 
     @property
     def has_key(self):
