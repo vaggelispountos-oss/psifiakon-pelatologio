@@ -1,40 +1,34 @@
-# Backend — Ψηφιακό Πελατολόγιο Οχημάτων (ΑΑΔΕ) — MVP
+# Backend — Ψηφιακό Πελατολόγιο Οχημάτων (ΑΑΔΕ)
 
-Flask backend για σύστημα Ψηφιακού Πελατολογίου Οχημάτων για συνεργείο
-αυτοκινήτων. **MVP για ΕΝΑ συνεργείο (single-tenant)** με **ΨΕΥΤΙΚΟ (mock)
-ΑΑΔΕ** — δεν καλεί ακόμα πραγματική ΑΑΔΕ.
+Flask backend, **multi-tenant**: κάθε συνεργείο-πελάτης (`Workshop`) έχει
+δικό του λογαριασμό (email/password + JWT) και βλέπει ΜΟΝΟ τα δικά του
+δεδομένα. Δύο τύποι επιχείρησης ανά workshop: `garage` (Συνεργείο, 4 Χρόνοι
+πλήρεις) και `rental` (Ενοικίαση Οχημάτων, 3 Χρόνοι — χωρίς κατηγορία
+υπηρεσίας). Deploy: Render (`render.yaml`), Postgres σε production, SQLite σε
+τοπική ανάπτυξη.
 
-## ⚠️ Σημαντικό — mock vs πραγματικό ΑΑΔΕ
+## mock vs πραγματική ΑΑΔΕ
 
-Όλη η επικοινωνία με την ΑΑΔΕ γίνεται μέσω του αρχείου
-[`mock_aade.py`](mock_aade.py) (κλάση `MockAadeService`). Αυτό **προσομοιώνει**
-τις απαντήσεις — δεν κάνει πραγματικά HTTP calls.
-
-Όταν έρθει η ώρα για σύνδεση με την **πραγματική ΑΑΔΕ**, φτιάχνεις ένα
-`real_aade.py` με κλάση `RealAadeService` που έχει **ΤΗΝ ΙΔΙΑ διεπαφή**:
-
-```python
-send_client(data)
-update_client(id_dcl, data)
-client_correlations(id_dcl, data)
-cancel_client(id_dcl)
-```
-
-Μετά αλλάζεις **μόνο** το `USE_MOCK_AADE=false` και το import στο
-[`app.py`](app.py) (υπάρχει σχόλιο-placeholder). **Η λογική των 4 Χρόνων δεν
-πειράζεται.**
+Η επικοινωνία με την ΑΑΔΕ γίνεται είτε μέσω [`mock_aade.py`](mock_aade.py)
+(`MockAadeService`, προσομοίωση — καμία πραγματική κλήση) είτε μέσω
+[`real_aade.py`](real_aade.py) (`RealAadeService`, πραγματικές κλήσεις XML).
+Ελέγχεται από το env var `USE_MOCK_AADE` (global default) — μπορεί να γίνει
+override **ανά workshop** μέσω `force_real_aade` (admin endpoint, δες
+παρακάτω), ώστε να δοκιμαστεί πραγματική ΑΑΔΕ σε ένα workshop χωρίς να
+επηρεαστούν οι υπόλοιποι tenants. Και οι δύο υλοποιήσεις έχουν το ίδιο
+interface (`send_client`, `update_client`, `client_correlations`,
+`cancel_client`) — η λογική των 4 Χρόνων δεν ξέρει ποια χρησιμοποιείται.
 
 ## Η λογική των 4 «Χρόνων»
-
-Το backend δεν είναι απλή είσοδος/έξοδος. Ακολουθεί τους 4 Χρόνους της ΑΑΔΕ:
 
 | Χρόνος | Endpoint | Μέθοδος ΑΑΔΕ | Τι κάνει |
 |--------|----------|--------------|----------|
 | 1ος | `POST /api/dcl/entry` | SendClient | Δημιουργεί εγγραφή, παίρνει `idDcl` + `creationDateTime` |
-| 2ος | `POST /api/dcl/service` | UpdateClient | Καταχώρηση κατηγορίας παρεχόμενης υπηρεσίας |
+| 2ος | `POST /api/dcl/service` | UpdateClient | Κατηγορία υπηρεσίας (ΜΟΝΟ `garage` — τα `rental` πάνε κατευθείαν στην Ολοκλήρωση) |
 | 3ος | `POST /api/dcl/exit` | UpdateClient (`entryCompletion`) | Ολοκλήρωση, παίρνει `completionDateTime` |
 | 4ος | `POST /api/dcl/correlate` | ClientCorrelations | Συσχέτιση παραστατικού (ΜΑΡΚ), παίρνει `correlateId` |
 | — | `POST /api/dcl/cancel` | CancelClient | Ακύρωση εγγραφής |
+| — | `POST /api/dcl/entries/<id>/resend` | — | Ξαναστέλνει τον τελευταίο Χρόνο αν δεν επιβεβαιώθηκε από την ΑΑΔΕ (π.χ. έπεσε το internet) |
 
 ## Εγκατάσταση & εκτέλεση
 
@@ -48,109 +42,114 @@ python app.py
 ```
 
 Το SQLite DB (`dcl.db`) δημιουργείται **αυτόματα** στο πρώτο τρέξιμο.
-Ο server ακούει στο `http://localhost:5000`.
+Ο server ακούει στο `http://localhost:5001` (ΟΧΙ 5000 — το κρατάει το
+AirPlay στο macOS). Σε production (`FLASK_ENV=production`), το backend
+σηκώνεται με `validate_production_config()` που **σκάει νωρίς** αν λείπουν
+κρίσιμα μυστικά (`JWT_SECRET_KEY`, `ENCRYPTION_KEY`) — δες `config.py`.
 
-## Endpoints
+## Auth
 
-### `GET /api/health`
-Έλεγχος ζωής. → `{"status": "ok"}`
+Multi-tenant JWT auth (`auth.py`). Το JWT identity είναι το `workshop.id`.
+Κάθε προστατευμένο endpoint καλεί `require_auth` που θέτει `g.workshop_id`
+και ελέγχει ενεργή συνδρομή (`trial`/`active` — αλλιώς 402).
 
-### `POST /api/dcl/entry` — 1ος Χρόνος
-```json
-{ "plate": "ΑΒΓ1234", "branch": 0, "customerName": "Γιάννης",
-  "vat": "123456789", "vehicleCategory": "ΙΧ", "vehicleFactory": "Toyota",
-  "comments": "..." }
-```
-→ `{ "entry_id", "idDcl", "creationDateTime", "status": "open" }`
+| Endpoint | Μέθοδος | Τι κάνει |
+|---|---|---|
+| `/api/auth/register` | POST | Νέο workshop + tokens (rate limited: 10/min) |
+| `/api/auth/login` | POST | Έλεγχος credentials + tokens (rate limited: 10/min) |
+| `/api/auth/refresh` | POST | Νέο access token από refresh token |
+| `/api/auth/me` | GET | Στοιχεία του logged-in workshop |
+| `/api/auth/password` | PUT | Αλλαγή κωδικού (`currentPassword`, `newPassword`) |
+| `/api/auth/business-type` | PUT | Αλλαγή `garage`/`rental` (επηρεάζει μόνο ΝΕΕΣ εγγραφές) |
+| `/api/auth/forgot-password` | POST | Στέλνει email επαναφοράς (rate limited: 5/min) — δες `email_service.py` |
+| `/api/auth/reset-password` | POST | Ολοκλήρωση επαναφοράς με token |
 
-### `POST /api/dcl/service` — 2ος Χρόνος
-```json
-{ "entry_id": 1, "providedServiceCategory": 1,
-  "providedServiceCategoryOther": null, "comments": "..." }
-```
-`providedServiceCategory` ∈ {1,2,3,9,4,6,5}. Αν είναι **5**, το
-`providedServiceCategoryOther` είναι **υποχρεωτικό**.
-→ `{ "updateUniqueId", "status": "in_progress" }`
+Rate limiting: `Flask-Limiter`, in-memory storage (αρκεί για ένα Render
+instance). Backend πίσω από `ProxyFix` ώστε το per-IP limiting να βλέπει την
+πραγματική IP του χρήστη, όχι του Render proxy.
 
-### `POST /api/dcl/exit` — 3ος Χρόνος
-```json
-{ "entry_id": 1, "invoiceKind": 1, "reasonNonIssueType": null }
-```
-`invoiceKind` ∈ {1=ΑΛΠ/ΑΠΥ, 2=Τιμολόγιο, 3=ΑΛΠ/ΑΠΥ-ΦΗΜ}.
-→ `{ "completionDateTime", "status": "completed" }`
+### Admin (`X-Admin-Key` header, `ADMIN_KEY` env var)
 
-### `POST /api/dcl/correlate` — 4ος Χρόνος
-```json
-{ "entry_id": 1, "mark": "400001234567890" }
-```
-→ `{ "correlateId", "status": "correlated" }`
+| Endpoint | Μέθοδος | Τι κάνει |
+|---|---|---|
+| `/api/admin/workshops` | GET | Λίστα όλων των workshops |
+| `/api/admin/workshops/<id>/status` | PUT | Αλλαγή `subscription_status` (χειροκίνητο billing) |
+| `/api/admin/workshops/<id>/trial` | PUT | Παράταση trial (`days`) |
+| `/api/admin/workshops/<id>/aade-mode` | PUT | Per-workshop override σε πραγματική ΑΑΔΕ |
 
-### `POST /api/dcl/cancel`
-```json
-{ "entry_id": 1 }
-```
-→ `{ "cancellationId", "status": "cancelled" }`
+## Βασικά endpoints (όλα `@require_auth` εκτός `/api/health`)
 
-### `GET /api/dcl/entries`
-Λίστα όλων των εγγραφών με το status τους.
-
-### `GET /api/dcl/entries/<id>`
-Μία εγγραφή με πλήρη στοιχεία + τα `AadeLogs` της (audit).
+- `GET/PUT /api/settings` — credentials ΑΑΔΕ (subscription key κρυπτογραφημένο στη βάση, δες `crypto.py`)
+- `POST /api/settings/test-connection` — ελαφριά κλήση RequestClients
+- `GET /api/customers?q=` — βάση πελατών/οχημάτων (αναζήτηση σε πινακίδα/όνομα/ΑΦΜ/τηλέφωνο)
+- `PATCH /api/customers/<id>` — επεξεργασία στοιχείων πελάτη
+- `GET /api/dcl/entries?limit=&offset=` — λίστα εγγραφών, **paginated** (default limit 200, max 500· `X-Total-Count` header)
+- `GET /api/dcl/entries/<id>` — μία εγγραφή + audit log (`AadeLogs`)
+- `GET /api/dcl/reconcile/<id>` — σύγκριση τοπικής εγγραφής με την ΑΑΔΕ
+- `GET/POST/PATCH /api/ocr/metrics*` — μετρικές ποιότητας OCR (fire-and-forget από το frontend)
+- `GET /api/account/export` / `DELETE /api/account` — GDPR: εξαγωγή δεδομένων / οριστική διαγραφή
 
 ## Δομή project
 
 ```
 backend/
-├── app.py            # Flask app + endpoints + λογική 4 Χρόνων
-├── models.py         # SQLAlchemy models (Customer, DclEntry, AadeLog)
-├── mock_aade.py      # ΨΕΥΤΙΚΗ ΑΑΔΕ — θα αντικατασταθεί από real_aade.py
-├── config.py         # Ρυθμίσεις από .env
-├── requirements.txt
-├── .env.example
-└── README.md
+├── app.py                       # Flask app + endpoints + λογική 4 Χρόνων
+├── auth.py                      # Multi-tenant auth, JWT, rate limiting, admin
+├── models.py                    # SQLAlchemy models (Workshop, Customer, DclEntry, AadeLog, Settings, OcrMetric)
+├── crypto.py                    # Κρυπτογράφηση aade_subscription_key (Fernet)
+├── email_service.py             # Resend REST API (password reset) — καταγράφει link στο log αν δεν έχει ρυθμιστεί
+├── mock_aade.py / real_aade.py  # Δύο υλοποιήσεις του ίδιου ΑΑΔΕ interface
+├── migrate_encrypt_settings.py  # One-off migration: plaintext -> encrypted keys (δες παρακάτω)
+├── config.py                    # Ρυθμίσεις από .env + validate_production_config()
+├── scripts/backup_db.sh         # pg_dump backup (τρέχει από .github/workflows/backup.yml)
+├── requirements.txt / requirements-dev.txt
+└── tests/
 ```
 
-## Πραγματική ΑΑΔΕ (`real_aade.py`)
+## Migration: κρυπτογράφηση AADE keys σε production
 
-Το [`real_aade.py`](real_aade.py) είναι η **πραγματική** σύνδεση με το API
-Ψηφιακού Πελατολογίου (myDATA DCL). Έχει **ίδιο interface** με το mock — η
-εναλλαγή γίνεται μόνο με `USE_MOCK_AADE`.
+Αν αυτή είναι η πρώτη φορά που ενεργοποιείς την κρυπτογράφηση
+(`crypto.py`/`ENCRYPTION_KEY`) σε ένα backend που έτρεχε ήδη με plaintext
+`aade_subscription_key` στη βάση, πρέπει να τρέξεις **μία φορά**, με
+πρόσβαση στην production βάση:
+
+```bash
+# Render dashboard -> dcl-backend -> Shell
+cd backend && python migrate_encrypt_settings.py
+```
+
+Idempotent (μπορείς να το ξανατρέξεις χωρίς βλάβη — τιμές που είναι ήδη
+κρυπτογραφημένες παραμένουν όπως είναι). Χωρίς αυτό, οι ΗΔΗ αποθηκευμένες
+τιμές παραμένουν σε plaintext στη βάση (οι ΝΕΕΣ αποθηκεύσεις κρυπτογραφούνται
+κανονικά — το πρόβλημα αφορά μόνο ιστορικά δεδομένα).
+
+## Πραγματική ΑΑΔΕ (`real_aade.py`)
 
 - **Μεταφορά XML** (όχι JSON): χτίζει XML σύμφωνο με τα επίσημα XSD στο
   [`aade_specs/DCL_v1_1/`](aade_specs/DCL_v1_1/), κάνει **XSD validation πριν την
   αποστολή**, και διαβάζει το `ResponseDoc`.
-- **Headers**: `aade-user-id`, `ocp-apim-subscription-key` (από τις Ρυθμίσεις).
+- **Headers**: `aade-user-id`, `ocp-apim-subscription-key` (από τις Ρυθμίσεις, ανά workshop).
 - **URLs**: dev `https://mydataapidev.aade.gr/DCL/`, prod
   `https://mydatapi.aade.gr/DCL/` (μέσω `AADE_ENV`).
 - **Δύο είδη σφαλμάτων**: τεχνικά (HTTP status — 401 = λάθος κωδικοί) και
-  επιχειρησιακά (HTTP 200 **αλλά** `statusCode != Success` μέσα στο XML — π.χ.
-  κωδικός 203 «mandatory field»). Ελέγχεται **πάντα** το `statusCode`.
+  επιχειρησιακά (HTTP 200 **αλλά** `statusCode != Success` μέσα στο XML).
+  Ελέγχεται **πάντα** το `statusCode`.
 - **Timeout + retry** (2 προσπάθειες) για δικτυακά σφάλματα.
 
-### ⚠️ Απαραίτητα specs
+### Απαραίτητα specs
 Κατέβασε (μία φορά) τα επίσημα XSD/παραδείγματα στο `aade_specs/`:
 - XSDs: `DCL_v1_1.zip` → `aade_specs/DCL_v1_1/`
 - Παραδείγματα: `SendClient.zip`, `UpdateClient.zip`
 
-### Unit tests (χωρίς πραγματική ΑΑΔΕ)
-Τα tests κάνουν mock το HTTP layer (`responses`) — καμία πραγματική κλήση:
+## Tests
 
 ```bash
-pip install -r requirements-dev.txt
-python -m pytest tests/ -v
+pip install -r requirements.txt -r requirements-dev.txt
+pytest -v
 ```
 
-### Τι μένει να επιβεβαιωθεί ΜΟΝΟ με πραγματικά dev credentials
-1. Βγάλε dev credentials από `mydata-dev-register.azurewebsites.net`.
-2. Βάλ' τα στις «Ρυθμίσεις ΑΑΔΕ» + `USE_MOCK_AADE=false`, `AADE_ENV=dev`.
-3. Τρέξε πλήρη ροή 4 Χρόνων στο **δοκιμαστικό** και επιβεβαίωσε:
-   - ότι τα endpoint paths/μορφή σώματος γίνονται δεκτά (η ΑΑΔΕ επιστρέφει
-     `Success` + `newClientDclID` κ.λπ.),
-   - τα `creationDateTime`/`completionDateTime` (η ΑΑΔΕ **δεν** τα επιστρέφει στο
-     `ResponseDoc` — χρησιμοποιούμε τοπικό UTC· η αυθεντική τιμή αντλείται με
-     `RequestClients`),
-   - το πλήρες parsing του `RequestedDoc` (έχει `TODO` — τώρα επιστρέφει raw XML
-     + `continuationToken`).
+Καμία πραγματική κλήση ΑΑΔΕ (mock HTTP layer με `responses`). Τρέχουν
+αυτόματα σε κάθε push/PR ([`../.github/workflows/tests.yml`](../.github/workflows/tests.yml)).
 
 ## Audit log
 

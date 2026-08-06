@@ -10,6 +10,7 @@ import Accordion from "./Accordion";
 import HelpKnowledgeBase from "./HelpKnowledgeBase";
 import ContactSupport from "./ContactSupport";
 import InstallAppPrompt from "./InstallAppPrompt";
+import AccountPrivacy from "./AccountPrivacy";
 
 export default function SettingsPanel({ onSaved }) {
   const [username, setUsername] = useState("");
@@ -218,13 +219,24 @@ export default function SettingsPanel({ onSaved }) {
 // Accordion με ΟΛΗ την οθόνη Ρυθμίσεων — μόνο μία ενότητα ανοιχτή τη φορά
 // ώστε να μην πιάνουν πολύ χώρο οι κάρτες. Σειρά (ζητήθηκε ρητά):
 // Οδηγός Σφαλμάτων πάνω-πάνω, Ρυθμίσεις ΑΑΔΕ κάτω-κάτω.
-export function SettingsAccordion({ onSaved }) {
+export function SettingsAccordion({ onSaved, onLogout, workshop, onWorkshopUpdated }) {
   return (
     <Accordion
       defaultOpen="kb"
       sections={[
         { id: "kb", title: "Οδηγός Σφαλμάτων — Τι κάνω αν δω…", render: () => <HelpKnowledgeBase /> },
         { id: "contact", title: "Επικοινωνία", render: () => <ContactSupport /> },
+        {
+          id: "privacy",
+          title: "Ο λογαριασμός & τα δεδομένα μου",
+          render: () => (
+            <AccountPrivacy
+              onLogout={onLogout}
+              workshop={workshop}
+              onWorkshopUpdated={onWorkshopUpdated}
+            />
+          ),
+        },
         {
           id: "install",
           title: "Εγκατάσταση στο κινητό",

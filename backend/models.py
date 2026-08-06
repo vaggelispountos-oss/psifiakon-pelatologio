@@ -42,6 +42,14 @@ class Workshop(db.Model):
     # (δες BUSINESS_TYPE_DEFAULT στο app.py).
     business_type = db.Column(db.String(20), nullable=True)
     created_at = db.Column(db.DateTime, default=utcnow)
+    # Πότε αποδέχθηκε τους Όρους Χρήσης / Πολιτική Απορρήτου. Nullable ώστε
+    # η auto-migration (app.py:_add_missing_columns) να το προσθέσει χωρίς
+    # να σπάσει υπάρχοντα workshops (δες BUSINESS_TYPE_DEFAULT σχόλιο πιο πάνω).
+    terms_accepted_at = db.Column(db.DateTime, nullable=True)
+    # Πότε λήγει η δωρεάν δοκιμαστική περίοδος (μπαίνει στην εγγραφή, δες
+    # auth.register). Nullable για παλιά workshops πριν τη στήλη — το
+    # require_auth πέφτει τότε σε created_at + TRIAL_DAYS (δες auth.py).
+    trial_ends_at = db.Column(db.DateTime, nullable=True)
 
     def set_password(self, raw_password):
         self.password_hash = generate_password_hash(raw_password)
@@ -275,6 +283,12 @@ class Settings(db.Model):
     # εγκατάσταση έστειλε ποια μετρική OCR στον κεντρικό telemetry server —
     # ΔΕΝ ταυτοποιεί προσωπικά δεδομένα πελάτη του συνεργείου.
     installation_id = db.Column(db.String(32), nullable=True)
+    # Per-workshop override: True -> χρησιμοποίησε ΠΡΑΓΜΑΤΙΚΗ ΑΑΔΕ για ΑΥΤΟ
+    # το workshop ακόμη κι όταν το global USE_MOCK_AADE=true (δες
+    # app._build_aade). Επιτρέπει ένα πρώτο πραγματικό τεστ χωρίς να αλλάξει
+    # συμπεριφορά για όλους τους υπόλοιπους tenants. Αλλάζει ΜΟΝΟ μέσω
+    # /api/admin (require_admin) — δεν εκτίθεται στον πελάτη.
+    force_real_aade = db.Column(db.Boolean, nullable=True)
     updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
 
     @property
@@ -398,3 +412,25 @@ class AadeLog(db.Model):
             "success": self.success,
             "createdAt": self.created_at.isoformat() if self.created_at else None,
         }
+
+
+class PasswordResetToken(db.Model):
+    """
+    Token επαναφοράς κωδικού (forgot-password). Κρατάμε ΜΟΝΟ το sha256 hash
+    του token — ποτέ το ίδιο το token — ώστε μια διαρροή της βάσης να μη
+    δίνει έτοιμα, ενεργά reset links. Το token είναι ήδη υψηλής εντροπίας
+    (secrets.token_urlsafe), οπότε sha256 lookup είναι ασφαλές (χωρίς το
+    κόστος bcrypt που χρειάζεται μόνο για δεδομένα χαμηλής εντροπίας όπως
+    κωδικοί χρήστη).
+    """
+
+    __tablename__ = "password_reset_tokens"
+
+    id = db.Column(db.Integer, primary_key=True)
+    workshop_id = db.Column(
+        db.Integer, db.ForeignKey("workshops.id"), nullable=False, index=True
+    )
+    token_hash = db.Column(db.String(64), nullable=False, unique=True, index=True)
+    created_at = db.Column(db.DateTime, default=utcnow)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    used_at = db.Column(db.DateTime, nullable=True)

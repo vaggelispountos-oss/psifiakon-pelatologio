@@ -20,12 +20,27 @@ services:
         generateValue: true
       - key: ADMIN_KEY
         generateValue: true
+      # sync: false ώστε μια χειροκίνητη αλλαγή στο Render dashboard (π.χ. για
+      # πρώτο πραγματικό τεστ ΑΑΔΕ) να ΜΗΝ επανέρχεται σε "true" σε κάθε
+      # redeploy από αυτό το blueprint. Χωρίς τιμή, το config.py κάνει
+      # default σε "true" (mock) — ασφαλές fallback.
       - key: USE_MOCK_AADE
-        value: "true"
+        sync: false
       # Βάλε εδώ το πραγματικό origin του Vercel frontend μετά το πρώτο
       # deploy (π.χ. https://dcl-frontend.vercel.app) — μέχρι τότε δεν
       # μπλοκάρει τίποτα (Flask-CORS default "*" αν μείνει κενό).
       - key: CORS_ORIGINS
+        sync: false
+      # Βάλε το πραγματικό Resend API key όταν είναι έτοιμο (χωρίς αυτό, το
+      # forgot-password απλά καταγράφει το link στα logs αντί να στέλνει
+      # email — δες backend/email_service.py).
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        sync: false
+      # Origin του production frontend — χρησιμοποιείται στο link επαναφοράς
+      # κωδικού μέσα στο email (π.χ. https://app.mygarage.gr).
+      - key: FRONTEND_URL
         sync: false
 
 databases:

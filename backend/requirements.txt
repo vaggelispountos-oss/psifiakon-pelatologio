@@ -2,6 +2,8 @@ Flask>=3.0
 Flask-SQLAlchemy>=3.1
 Flask-CORS>=4.0
 Flask-JWT-Extended>=4.6
+# Rate limiting για /api/auth/* (brute-force protection στο login)
+Flask-Limiter>=3.5
 python-dotenv>=1.0
 # Production WSGI server (Render/Railway κ.λπ.) — το `python app.py` (Werkzeug
 # dev server) ΔΕΝ πρέπει να τρέχει σε production.

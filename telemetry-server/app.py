@@ -52,11 +52,12 @@ class CentralMetric(db.Model):
 
     mode = db.Column(db.String(10), nullable=True)
     engine = db.Column(db.String(30), nullable=True)
-    ocr_plate = db.Column(db.String(20), nullable=True)
+    # ΔΕΝ αποθηκεύουμε ποτέ την πραγματική πινακίδα (προσωπικό δεδομένο του
+    # πελάτη του συνεργείου) — μόνο αν αναγνωρίστηκε κάτι ή όχι.
+    ocr_success = db.Column(db.Boolean, nullable=True)
     confidence = db.Column(db.Integer, nullable=True)
     warnings_count = db.Column(db.Integer, nullable=True)
     parser_corrected = db.Column(db.Boolean, nullable=True)
-    final_plate = db.Column(db.String(20), nullable=True)
     user_edited = db.Column(db.Boolean, nullable=True)
     confirmed = db.Column(db.Boolean, nullable=True)
     # Πότε έγινε η σάρωση στην πλευρά του πελάτη (μπορεί να διαφέρει λίγο από
@@ -70,11 +71,10 @@ class CentralMetric(db.Model):
             "installationId": self.installation_id,
             "mode": self.mode,
             "engine": self.engine,
-            "ocrPlate": self.ocr_plate,
+            "ocrSuccess": self.ocr_success,
             "confidence": self.confidence,
             "warningsCount": self.warnings_count,
             "parserCorrected": self.parser_corrected,
-            "finalPlate": self.final_plate,
             "userEdited": self.user_edited,
             "confirmed": self.confirmed,
             "clientCreatedAt": self.client_created_at,
@@ -125,15 +125,17 @@ def register_routes(app):
         data = request.get_json(silent=True) or {}
         installation_id = (data.get("installationId") or "unknown").strip()
 
+        # ocrPlate/finalPlate δεν στέλνονται πλέον από τον client (data
+        # minimization) — αν κάποιο παλιό client τα στείλει ακόμη, αγνοούνται
+        # ρητά εδώ ώστε να ΜΗΝ καταλήξει ποτέ πινακίδα σε αυτή τη βάση.
         row = CentralMetric(
             installation_id=installation_id,
             mode=data.get("mode"),
             engine=data.get("engine"),
-            ocr_plate=data.get("ocrPlate"),
+            ocr_success=bool(data.get("ocrSuccess", bool(data.get("ocrPlate")))),
             confidence=data.get("confidence"),
             warnings_count=data.get("warningsCount"),
             parser_corrected=data.get("parserCorrected"),
-            final_plate=data.get("finalPlate"),
             user_edited=data.get("userEdited"),
             confirmed=data.get("confirmed"),
             client_created_at=data.get("createdAt"),
@@ -155,7 +157,7 @@ def register_routes(app):
 
         rows = CentralMetric.query.order_by(CentralMetric.received_at.desc()).all()
         total = len(rows)
-        successes = sum(1 for r in rows if r.ocr_plate)
+        successes = sum(1 for r in rows if r.ocr_success)
         confirmed = [r for r in rows if r.confirmed]
         user_edited = sum(1 for r in confirmed if r.user_edited)
         confidences = [r.confidence for r in rows if r.confidence is not None]
@@ -166,7 +168,7 @@ def register_routes(app):
                 r.installation_id, {"total": 0, "successes": 0, "confirmed": 0, "user_edited": 0}
             )
             g["total"] += 1
-            if r.ocr_plate:
+            if r.ocr_success:
                 g["successes"] += 1
             if r.confirmed:
                 g["confirmed"] += 1
@@ -242,7 +244,7 @@ DASHBOARD_TEMPLATE = """
 
   <h2>Τελευταίες 100 σαρώσεις</h2>
   <table>
-    <thead><tr><th>Ώρα</th><th>Εγκατάσταση</th><th>Τύπος</th><th>Μηχανή</th><th>OCR</th><th>Τελικό</th><th>Βεβαιότητα</th><th>Διορθώθηκε;</th></tr></thead>
+    <thead><tr><th>Ώρα</th><th>Εγκατάσταση</th><th>Τύπος</th><th>Μηχανή</th><th>OCR</th><th>Βεβαιότητα</th><th>Διορθώθηκε;</th></tr></thead>
     <tbody>
       {% for r in rows %}
       <tr>
@@ -250,8 +252,7 @@ DASHBOARD_TEMPLATE = """
         <td class="mono">{{ r.installation_id }}</td>
         <td>{{ r.mode or "—" }}</td>
         <td>{{ r.engine or "—" }}</td>
-        <td class="mono">{{ r.ocr_plate or "—" }}</td>
-        <td class="mono">{{ r.final_plate or "—" }}</td>
+        <td>{% if r.ocr_success %}<span class="yes">✅</span>{% else %}<span class="no">❌</span>{% endif %}</td>
         <td>{{ r.confidence if r.confidence is not none else "—" }}{{ "%" if r.confidence is not none else "" }}</td>
         <td>
           {% if not r.confirmed %}—

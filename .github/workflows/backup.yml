@@ -1,0 +1,28 @@
+name: Database backup
+
+on:
+  schedule:
+    # 03:00 UTC καθημερινά (χαμηλή κίνηση για συνεργείο Ελλάδας).
+    - cron: "0 3 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install postgresql-client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Run pg_dump
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: backend/scripts/backup_db.sh backups
+
+      - name: Upload backup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dcl-db-backup-${{ github.run_id }}
+          path: backups/*.sql.gz
+          retention-days: 30

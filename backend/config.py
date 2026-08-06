@@ -59,6 +59,11 @@ class Config:
         os.getenv("JWT_REFRESH_TOKEN_EXPIRES_DAYS", "30")
     )
 
+    # --- Trial ---
+    # Μέρες δωρεάν δοκιμαστικής περιόδου από την εγγραφή. Μετά, το require_auth
+    # μπλοκάρει (402) μέχρι χειροκίνητη ενεργοποίηση μέσω /api/admin.
+    TRIAL_DAYS = int(os.getenv("TRIAL_DAYS", "14"))
+
     # --- Admin (χειροκίνητη έγκριση συνδρομών μετά από τραπεζική μεταφορά) ---
     # Μοιραζόμενο μυστικό — μπαίνει στο header X-Admin-Key. Άδειο (default) =
     # τα admin endpoints είναι ΚΛΕΙΣΤΑ (401 σε όλα), όχι ανοιχτά χωρίς κλειδί.
@@ -112,6 +117,18 @@ class Config:
     # Κοινό μυστικό ανάμεσα σε ΟΛΕΣ τις εγκαταστάσεις και τον server σου —
     # πρέπει να ταιριάζει με το INGEST_KEY του telemetry-server.
     TELEMETRY_KEY = os.getenv("TELEMETRY_KEY", "").strip()
+
+    # --- Email (επαναφορά κωδικού, μέσω Resend REST API) ---
+    # Κενό (default) = δεν στέλνεται πραγματικό email· το email_service.py
+    # καταγράφει το link στο log αντί να σκάει, ώστε να δουλεύει η ροή
+    # τοπικά πριν ρυθμιστεί πραγματικός λογαριασμός Resend.
+    RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
+    RESEND_FROM_EMAIL = os.getenv(
+        "RESEND_FROM_EMAIL", "Ψηφιακό Πελατολόγιο <onboarding@resend.dev>"
+    )
+    # Origin του frontend — χρησιμοποιείται για να χτιστεί το link επαναφοράς
+    # κωδικού (/reset-password?token=...) μέσα στο email.
+    FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
 
 
 def validate_production_config(config=Config):

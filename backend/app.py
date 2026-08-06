@@ -22,6 +22,7 @@ import requests
 from flask import Flask, current_app, g, jsonify, request
 from flask_cors import CORS
 from sqlalchemy import inspect, text
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from auth import init_auth, require_auth
 from config import Config, validate_production_config
@@ -40,6 +41,12 @@ from mock_aade import MockAadeService
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
+
+    # Render (και οι περισσότεροι PaaS) βάζουν την εφαρμογή πίσω από έναν
+    # reverse proxy — χωρίς αυτό, request.remote_addr θα ήταν πάντα η IP του
+    # proxy, όχι του πραγματικού χρήστη, κι έτσι το per-IP rate limiting
+    # (δες auth.limiter) θα μετρούσε ΟΛΟΥΣ τους χρήστες σαν έναν.
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
 
     if app.config["FLASK_ENV"] == "production":
         validate_production_config()
@@ -191,7 +198,16 @@ def _forward_metric_to_telemetry(payload):
         return
     key = current_app.config.get("TELEMETRY_KEY")
     installation_id = _get_installation_id()
-    body = {**payload, "installationId": installation_id}
+    # Data minimization: η πραγματική πινακίδα (ocrPlate/finalPlate) είναι
+    # προσωπικό δεδομένο πελάτη του συνεργείου — ΔΕΝ χρειάζεται για να
+    # μετρηθεί η απόδοση του OCR (ποσοστό επιτυχίας, user_edited, κλπ), άρα
+    # ΔΕΝ φεύγει ποτέ προς τον telemetry server. Κρατάμε μόνο το boolean
+    # "αναγνωρίστηκε κάτι" (ocrSuccess) που χρειάζεται το ποσοστό επιτυχίας.
+    body = {
+        k: v for k, v in payload.items() if k not in ("ocrPlate", "finalPlate")
+    }
+    body["ocrSuccess"] = bool(payload.get("ocrPlate"))
+    body["installationId"] = installation_id
 
     def _send():
         try:
@@ -218,7 +234,11 @@ def _build_aade(settings):
         "branch": settings.branch,
         "entity_vat_number": settings.entity_vat_number,
     }
-    if current_app.config["USE_MOCK_AADE"]:
+    # force_real_aade: per-workshop override (δες /api/admin/.../aade-mode)
+    # ώστε ΕΝΑ workshop να δοκιμάσει πραγματική ΑΑΔΕ χωρίς να αλλάξει
+    # συμπεριφορά για όλους τους υπόλοιπους tenants στο ίδιο deployment.
+    use_mock = current_app.config["USE_MOCK_AADE"] and not settings.force_real_aade
+    if use_mock:
         return MockAadeService(**creds)
     # Πραγματική ΑΑΔΕ — ίδιο interface, περνά και το base_url (dev/prod).
     from real_aade import RealAadeService
@@ -324,6 +344,101 @@ def register_routes(app):
 
         db.session.commit()
         return jsonify(settings.to_dict())
+
+    # ----------------------------------------------------------------
+    # Βάση Πελατών/Οχημάτων — λίστα (με αναζήτηση) + επεξεργασία στοιχείων.
+    # Ξεχωριστό από τα /api/dcl/entries: εδώ είναι ΜΙΑ γραμμή ανά πινακίδα
+    # με τα στοιχεία επαφής (όνομα/ΑΦΜ/τηλέφωνο) που κρατά ήδη το μοντέλο
+    # Customer αλλά δεν εκτίθονταν πουθενά.
+    # ----------------------------------------------------------------
+    @app.route("/api/customers", methods=["GET"])
+    @require_auth
+    def list_customers():
+        q = (request.args.get("q") or "").strip()
+        query = Customer.query.filter_by(workshop_id=g.workshop_id)
+        if q:
+            like = f"%{q}%"
+            query = query.filter(
+                db.or_(
+                    Customer.plate.ilike(like),
+                    Customer.name.ilike(like),
+                    Customer.vat.ilike(like),
+                    Customer.phone.ilike(like),
+                )
+            )
+        customers = query.order_by(Customer.plate.asc()).all()
+        return jsonify([c.to_dict() for c in customers])
+
+    @app.route("/api/customers/<int:customer_id>", methods=["PATCH"])
+    @require_auth
+    def update_customer(customer_id):
+        customer = Customer.query.filter_by(
+            id=customer_id, workshop_id=g.workshop_id
+        ).first()
+        if customer is None:
+            raise ApiError("Δεν βρέθηκε ο πελάτης.", 404)
+
+        data = request.get_json(silent=True) or {}
+        if "name" in data:
+            customer.name = (data.get("name") or "").strip() or None
+        if "vat" in data:
+            vat = (data.get("vat") or "").strip()
+            if vat and not (vat.isdigit() and len(vat) == 9):
+                raise ApiError("Το ΑΦΜ πρέπει να είναι 9 ψηφία.")
+            customer.vat = vat or None
+        if "phone" in data:
+            customer.phone = (data.get("phone") or "").strip() or None
+
+        db.session.commit()
+        return jsonify(customer.to_dict())
+
+    # ----------------------------------------------------------------
+    # Λογαριασμός — εξαγωγή δεδομένων (portability) / διαγραφή (erasure)
+    # ----------------------------------------------------------------
+    @app.route("/api/account/export", methods=["GET"])
+    @require_auth
+    def export_account():
+        workshop = Workshop.query.get(g.workshop_id)
+        customers = Customer.query.filter_by(workshop_id=g.workshop_id).all()
+        entries = DclEntry.query.filter_by(workshop_id=g.workshop_id).all()
+        settings = Settings.query.filter_by(workshop_id=g.workshop_id).first()
+        return jsonify(
+            {
+                "workshop": workshop.to_dict(),
+                "customers": [c.to_dict() for c in customers],
+                "dclEntries": [e.to_dict(include_logs=True) for e in entries],
+                "settings": settings.to_dict() if settings else None,
+            }
+        )
+
+    @app.route("/api/account", methods=["DELETE"])
+    @require_auth
+    def delete_account():
+        data = request.get_json(silent=True) or {}
+        password = data.get("password") or ""
+        workshop = Workshop.query.get(g.workshop_id)
+        if workshop is None or not workshop.check_password(password):
+            # ΟΧΙ 401: το frontend κάνει global logout σε ΚΑΘΕ 401 (λήξη
+            # session) — ένα λάθος πληκτρολογημένος κωδικός εδώ δεν πρέπει
+            # να αποσυνδέει τον ήδη-συνδεδεμένο χρήστη.
+            return jsonify({"error": "Λάθος κωδικός."}), 400
+
+        Customer.query.filter_by(workshop_id=g.workshop_id).delete()
+        OcrMetric.query.filter_by(workshop_id=g.workshop_id).delete()
+        # Το delete() του query δεν ενεργοποιεί cascade στα relationships
+        # (π.χ. DclEntry.logs -> AadeLog) — σβήνουμε ρητά τα AadeLog πρώτα.
+        entry_ids = [
+            e.id for e in DclEntry.query.filter_by(workshop_id=g.workshop_id).all()
+        ]
+        if entry_ids:
+            AadeLog.query.filter(AadeLog.dcl_entry_id.in_(entry_ids)).delete(
+                synchronize_session=False
+            )
+        DclEntry.query.filter_by(workshop_id=g.workshop_id).delete()
+        Settings.query.filter_by(workshop_id=g.workshop_id).delete()
+        db.session.delete(workshop)
+        db.session.commit()
+        return "", 204
 
     # ----------------------------------------------------------------
     # Έλεγχος σύνδεσης ΑΑΔΕ (ελαφριά κλήση RequestClients)
@@ -842,12 +957,21 @@ def register_routes(app):
     @app.route("/api/dcl/entries", methods=["GET"])
     @require_auth
     def list_entries():
-        entries = (
+        # Χωρίς όριο, αυτό το endpoint γυρνάει ΟΛΟ το ιστορικό του workshop σε
+        # ΚΑΘΕ φόρτωση (π.χ. 7.000+ εγγραφές/χρόνο για ένα ενεργό συνεργείο) —
+        # αργό σε κινητό/4G και άσκοπο, αφού τα tabs "Λειτουργία"/"Εγγραφές"
+        # χρειάζονται μόνο τις πρόσφατες. limit/offset για βαθύτερη αναζήτηση.
+        limit = min(_parse_int(request.args.get("limit", 200), "limit"), 500)
+        offset = max(_parse_int(request.args.get("offset", 0), "offset"), 0)
+        query = (
             DclEntry.query.filter_by(workshop_id=g.workshop_id)
             .order_by(DclEntry.created_at.desc())
-            .all()
         )
-        return jsonify([e.to_dict() for e in entries])
+        total = query.count()
+        entries = query.offset(offset).limit(limit).all()
+        response = jsonify([e.to_dict() for e in entries])
+        response.headers["X-Total-Count"] = str(total)
+        return response
 
     @app.route("/api/dcl/entries/<int:entry_id>", methods=["GET"])
     @require_auth

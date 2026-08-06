@@ -30,19 +30,24 @@ body {
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
 }
 
 .app {
   max-width: 560px;
   margin: 0 auto;
   padding: 0 12px 40px;
+  overflow-x: hidden;
 }
 
-/* Topbar */
+/* Topbar — column stack: το brand πάντα σε δική του γραμμή, και τα
+   κουμπιά/status δεξιά τυλίγονται σε δικές τους γραμμές αντί να ξεφεύγουν
+   οριζόντια από την οθόνη σε στενά ή scaled-up κινητά. */
 .topbar {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: stretch;
+  row-gap: 8px;
   padding: 14px 4px;
   position: sticky;
   top: 0;
@@ -51,12 +56,23 @@ body {
 }
 .brand {
   font-weight: 700;
-  font-size: 1.15rem;
+  font-size: 1.1rem;
+  min-width: 0;
+  overflow-wrap: break-word;
 }
 .topbar-right {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+}
+.topbar-right .muted {
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .btn-new-vehicle {
   white-space: nowrap;
@@ -645,6 +661,20 @@ textarea.input {
 .table th {
   color: var(--muted);
   font-weight: 600;
+}
+.customer-edit-row td {
+  white-space: normal;
+}
+.customer-edit-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+  padding: 8px 0;
+}
+.customer-edit-form .field-label {
+  flex: 1 1 140px;
+  min-width: 120px;
 }
 
 /* Login split-screen */

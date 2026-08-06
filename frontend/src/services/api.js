@@ -17,6 +17,7 @@ const API_URL = (import.meta.env && import.meta.env.VITE_API_URL) || "";
 // Αποθηκεύεται στο localStorage ώστε να επιζεί από refresh της σελίδας.
 // --------------------------------------------------------------------
 const TOKEN_KEY = "dcl_access_token";
+const REFRESH_TOKEN_KEY = "dcl_refresh_token";
 const WORKSHOP_KEY = "dcl_workshop";
 
 let onUnauthorized = null;
@@ -29,14 +30,49 @@ export function getToken() {
   return localStorage.getItem(TOKEN_KEY);
 }
 
-function setSession(accessToken, workshop) {
+function getRefreshToken() {
+  return localStorage.getItem(REFRESH_TOKEN_KEY);
+}
+
+function setSession(accessToken, workshop, refreshToken) {
   localStorage.setItem(TOKEN_KEY, accessToken);
+  if (refreshToken) localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
   if (workshop) localStorage.setItem(WORKSHOP_KEY, JSON.stringify(workshop));
 }
 
 export function clearSession() {
   localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(REFRESH_TOKEN_KEY);
   localStorage.removeItem(WORKSHOP_KEY);
+}
+
+// Το access token λήγει κάθε 60 λεπτά (JWT_ACCESS_TOKEN_EXPIRES_MIN). Πριν
+// υπήρχε ΜΟΝΟ logout σε κάθε 401 — το backend εξέδιδε refreshToken αλλά
+// κανείς δεν το χρησιμοποιούσε. Τώρα σε 401 προσπαθούμε ΠΡΩΤΑ ανανέωση
+// μέσω /api/auth/refresh και ξαναδοκιμάζουμε το αίτημα, οπότε ο χρήστης
+// μένει συνδεδεμένος μέχρι να λήξει το refresh token (30 μέρες).
+// `refreshPromise` μαζεύει ταυτόχρονα 401 σε ΕΝΑ μόνο /refresh call.
+let refreshPromise = null;
+function refreshAccessToken() {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return Promise.resolve(false);
+  if (!refreshPromise) {
+    refreshPromise = fetch(`${API_URL}/api/auth/refresh`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${refreshToken}` },
+    })
+      .then(async (res) => {
+        if (!res.ok) return false;
+        const data = await res.json();
+        localStorage.setItem(TOKEN_KEY, data.accessToken);
+        return true;
+      })
+      .catch(() => false)
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+  return refreshPromise;
 }
 
 export function getStoredWorkshop() {
@@ -49,11 +85,17 @@ export function getStoredWorkshop() {
   }
 }
 
+/** Ενημερώνει το cached workshop (localStorage) μετά από αλλαγή στοιχείων
+ * (π.χ. businessType) — ώστε η επόμενη φόρτωση να δείχνει τη σωστή ροή. */
+export function setStoredWorkshop(workshop) {
+  localStorage.setItem(WORKSHOP_KEY, JSON.stringify(workshop));
+}
+
 /**
  * Εσωτερικός helper για κλήσεις fetch με καθαρό error handling.
  * Επιστρέφει το parsed JSON ή πετάει Error με ελληνικό μήνυμα.
  */
-async function request(path, { method = "GET", body, skipAuth = false } = {}) {
+async function request(path, { method = "GET", body, skipAuth = false, _retried = false } = {}) {
   const url = `${API_URL}${path}`;
   let response;
 
@@ -73,6 +115,15 @@ async function request(path, { method = "GET", body, skipAuth = false } = {}) {
       `Αποτυχία σύνδεσης με τον server (${API_URL}). ` +
         `Βεβαιώσου ότι το backend τρέχει. (${networkErr.message})`
     );
+  }
+
+  // Έληξε το access token -> προσπάθησε ανανέωση ΜΙΑ φορά και ξαναδοκίμασε
+  // το ίδιο αίτημα πριν αποδεχτείς ότι χρειάζεται πραγματικό logout.
+  if (response.status === 401 && !skipAuth && !_retried) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) {
+      return request(path, { method, body, skipAuth, _retried: true });
+    }
   }
 
   // Προσπάθησε να διαβάσεις JSON (ακόμη κι όταν είναι error)
@@ -102,13 +153,13 @@ async function request(path, { method = "GET", body, skipAuth = false } = {}) {
 }
 
 // ---- Auth ----
-export async function register({ name, email, password, businessType }) {
+export async function register({ name, email, password, businessType, termsAccepted }) {
   const data = await request("/api/auth/register", {
     method: "POST",
-    body: { name, email, password, businessType },
+    body: { name, email, password, businessType, termsAccepted },
     skipAuth: true,
   });
-  setSession(data.accessToken, data.workshop);
+  setSession(data.accessToken, data.workshop, data.refreshToken);
   return data;
 }
 
@@ -118,12 +169,55 @@ export async function login({ email, password }) {
     body: { email, password },
     skipAuth: true,
   });
-  setSession(data.accessToken, data.workshop);
+  setSession(data.accessToken, data.workshop, data.refreshToken);
   return data;
 }
 
 export function logout() {
   clearSession();
+}
+
+export function forgotPassword(email) {
+  return request("/api/auth/forgot-password", {
+    method: "POST",
+    body: { email },
+    skipAuth: true,
+  });
+}
+
+export function resetPassword(token, password) {
+  return request("/api/auth/reset-password", {
+    method: "POST",
+    body: { token, password },
+    skipAuth: true,
+  });
+}
+
+// ---- Λογαριασμός — αλλαγή κωδικού / τύπου επιχείρησης ----
+export function changePassword(currentPassword, newPassword) {
+  return request("/api/auth/password", {
+    method: "PUT",
+    body: { currentPassword, newPassword },
+  });
+}
+
+export function changeBusinessType(businessType) {
+  return request("/api/auth/business-type", {
+    method: "PUT",
+    body: { businessType },
+  });
+}
+
+// ---- Λογαριασμός — εξαγωγή δεδομένων / διαγραφή (GDPR) ----
+export function exportAccountData() {
+  return request("/api/account/export");
+}
+
+export function deleteAccount(password) {
+  return request("/api/account", {
+    method: "DELETE",
+    body: { password },
+  });
 }
 
 // ---- Health ----
@@ -282,6 +376,19 @@ export function getOcrMetricsSummary() {
 
 export function getOcrMetrics(limit = 50) {
   return request(`/api/ocr/metrics?limit=${limit}`);
+}
+
+// ---- Βάση Πελατών/Οχημάτων ----
+export function getCustomers(q = "") {
+  const qs = q.trim() ? `?q=${encodeURIComponent(q.trim())}` : "";
+  return request(`/api/customers${qs}`);
+}
+
+export function updateCustomer(id, { name, vat, phone }) {
+  return request(`/api/customers/${id}`, {
+    method: "PATCH",
+    body: { name, vat, phone },
+  });
 }
 
 // ---- Λίστα / λεπτομέρειες ----

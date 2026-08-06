@@ -17,6 +17,7 @@ import {
   getStoredWorkshop,
   getToken,
   logout,
+  setStoredWorkshop,
   setUnauthorizedHandler,
 } from "./services/api";
 import { STATUS_LABELS, STATUS_LABELS_RENTAL } from "./constants";
@@ -30,6 +31,8 @@ import HistoryLog from "./components/HistoryLog";
 import OcrStats from "./components/OcrStats";
 import { SettingsAccordion } from "./components/SettingsPanel";
 import Login from "./components/Login";
+import { PrivacyPolicy, TermsOfService } from "./components/LegalPages";
+import ResetPassword from "./components/ResetPassword";
 
 // Τα 3 πρώτα tabs δείχνουν όλα την ΙΔΙΑ λίστα εγγραφών, απλά ομαδοποιημένη
 // διαφορετικά — το `hint` εξηγεί ΤΙ διαφορετικό δείχνει το καθένα, γιατί
@@ -119,6 +122,18 @@ export default function App() {
 
   const isAuthenticated = authChecked && !!getToken() && !!workshop;
 
+  // /privacy και /terms είναι δημόσιες σελίδες — προσβάσιμες ΧΩΡΙΣ σύνδεση
+  // (π.χ. πριν την εγγραφή), γι' αυτό ελέγχονται πριν το auth gate.
+  if (window.location.pathname === "/privacy") {
+    return <PrivacyPolicy />;
+  }
+  if (window.location.pathname === "/terms") {
+    return <TermsOfService />;
+  }
+  if (window.location.pathname === "/reset-password") {
+    return <ResetPassword />;
+  }
+
   if (!isAuthenticated) {
     return <Login onAuthenticated={(w) => setWorkshop(w)} />;
   }
@@ -130,11 +145,15 @@ export default function App() {
         logout();
         setWorkshop(null);
       }}
+      onWorkshopUpdated={(w) => {
+        setStoredWorkshop(w);
+        setWorkshop(w);
+      }}
     />
   );
 }
 
-function AuthenticatedApp({ workshop, onLogout }) {
+function AuthenticatedApp({ workshop, onLogout, onWorkshopUpdated }) {
   const isRental = workshop?.businessType === "rental";
   const [tab, setTab] = useState("flow");
   const [entries, setEntries] = useState([]);
@@ -511,7 +530,12 @@ function AuthenticatedApp({ workshop, onLogout }) {
         )}
         {tab === "ocr-stats" && <OcrStats />}
         {tab === "settings" && (
-          <SettingsAccordion onSaved={(s) => setHasKey(!!s.has_key)} />
+          <SettingsAccordion
+            onSaved={(s) => setHasKey(!!s.has_key)}
+            onLogout={onLogout}
+            workshop={workshop}
+            onWorkshopUpdated={onWorkshopUpdated}
+          />
         )}
       </main>
     </div>

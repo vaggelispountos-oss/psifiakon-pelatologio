@@ -4,17 +4,26 @@
 // δεν υπάρχει έγκυρο access token.
 // --------------------------------------------------------------------
 import { useState } from "react";
-import { login, register } from "../services/api";
+import { login, register, forgotPassword } from "../services/api";
 import { BUSINESS_TYPES } from "../constants";
 
 export default function Login({ onAuthenticated }) {
-  const [mode, setMode] = useState("login"); // login | register
+  const [mode, setMode] = useState("login"); // login | register | forgot
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [businessType, setBusinessType] = useState("");
+  const [termsAccepted, setTermsAccepted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [forgotSent, setForgotSent] = useState(false);
+
+  function openLegalPage(path) {
+    return (e) => {
+      e.preventDefault();
+      window.open(path, "_blank", "noopener,noreferrer");
+    };
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -23,18 +32,33 @@ export default function Login({ onAuthenticated }) {
       setError("Επίλεξε τι είδους επιχείρηση είσαι.");
       return;
     }
+    if (mode === "register" && !termsAccepted) {
+      setError("Πρέπει να αποδεχθείς τους Όρους Χρήσης και την Πολιτική Απορρήτου.");
+      return;
+    }
     setBusy(true);
     try {
+      if (mode === "forgot") {
+        await forgotPassword(email);
+        setForgotSent(true);
+        return;
+      }
       const data =
         mode === "login"
           ? await login({ email, password })
-          : await register({ name, email, password, businessType });
+          : await register({ name, email, password, businessType, termsAccepted });
       onAuthenticated(data.workshop);
     } catch (err) {
       setError(err.message);
     } finally {
       setBusy(false);
     }
+  }
+
+  function switchMode(nextMode) {
+    setError(null);
+    setForgotSent(false);
+    setMode(nextMode);
   }
 
   return (
@@ -162,11 +186,19 @@ export default function Login({ onAuthenticated }) {
           <p className="muted" style={{ marginTop: 0 }}>
             {mode === "login"
               ? "Σύνδεση στον λογαριασμό του συνεργείου σου."
-              : "Δημιουργία λογαριασμού για το συνεργείο σου."}
+              : mode === "register"
+              ? "Δημιουργία λογαριασμού για το συνεργείο σου."
+              : "Στείλε μας το email σου και θα λάβεις σύνδεσμο επαναφοράς κωδικού."}
           </p>
 
           {error && <div className="alert alert-error">{error}</div>}
 
+          {mode === "forgot" && forgotSent ? (
+            <div className="alert alert-info">
+              Αν υπάρχει λογαριασμός με αυτό το email, στάλθηκε σύνδεσμος
+              επαναφοράς κωδικού. Έλεγξε τα εισερχόμενά σου (και τα spam).
+            </div>
+          ) : (
           <form onSubmit={handleSubmit}>
             {mode === "register" && (
               <>
@@ -212,20 +244,53 @@ export default function Login({ onAuthenticated }) {
                 required
               />
             </label>
-            <label className="field-label">
-              Κωδικός:
-              <input
-                type="password"
-                className="input"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete={
-                  mode === "login" ? "current-password" : "new-password"
-                }
-                minLength={8}
-                required
-              />
-            </label>
+            {mode !== "forgot" && (
+              <label className="field-label">
+                Κωδικός:
+                <input
+                  type="password"
+                  className="input"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete={
+                    mode === "login" ? "current-password" : "new-password"
+                  }
+                  minLength={8}
+                  required
+                />
+              </label>
+            )}
+            {mode === "login" && (
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => switchMode("forgot")}
+                style={{ marginBottom: "10px" }}
+              >
+                Ξέχασες τον κωδικό;
+              </button>
+            )}
+            {mode === "register" && (
+              <label className="field-label" style={{ flexDirection: "row", alignItems: "center", gap: "8px" }}>
+                <input
+                  type="checkbox"
+                  checked={termsAccepted}
+                  onChange={(e) => setTermsAccepted(e.target.checked)}
+                  required
+                />
+                <span>
+                  Διάβασα και αποδέχομαι τους{" "}
+                  <a href="/terms" onClick={openLegalPage("/terms")}>
+                    Όρους Χρήσης
+                  </a>{" "}
+                  και την{" "}
+                  <a href="/privacy" onClick={openLegalPage("/privacy")}>
+                    Πολιτική Απορρήτου
+                  </a>
+                  .
+                </span>
+              </label>
+            )}
             <button
               type="submit"
               className="btn btn-primary btn-block"
@@ -235,21 +300,23 @@ export default function Login({ onAuthenticated }) {
                 ? "..."
                 : mode === "login"
                 ? "Σύνδεση"
-                : "Δημιουργία λογαριασμού"}
+                : mode === "register"
+                ? "Δημιουργία λογαριασμού"
+                : "Αποστολή συνδέσμου επαναφοράς"}
             </button>
           </form>
+          )}
 
           <button
             type="button"
             className="btn btn-ghost btn-block"
-            onClick={() => {
-              setError(null);
-              setMode(mode === "login" ? "register" : "login");
-            }}
+            onClick={() => switchMode(mode === "register" ? "login" : mode === "forgot" ? "login" : "register")}
           >
             {mode === "login"
               ? "Δεν έχεις λογαριασμό; Δημιούργησε έναν"
-              : "Έχεις ήδη λογαριασμό; Σύνδεση"}
+              : mode === "register"
+              ? "Έχεις ήδη λογαριασμό; Σύνδεση"
+              : "← Πίσω στη σύνδεση"}
           </button>
         </div>
         </div>
