@@ -651,6 +651,11 @@ def register_routes(app):
             "providedServiceCategory": category,
             "providedServiceCategoryOther": other,
         }
+        # Οι κατηγορίες 4 (Δωρεάν), 6 (Εγγύηση) και 9 (Ιδιόχρηση) δεν οδηγούν
+        # ποτέ σε παραστατικό — η ΑΑΔΕ απαιτεί nonIssueInvoice=true ήδη από
+        # τον 2ο Χρόνο σε αυτές (business error 203 αλλιώς).
+        if category in (4, 6, 9):
+            aade_payload["nonIssueInvoice"] = True
         result = aade.update_client(entry.id_dcl, aade_payload)
 
         if "error" in result:
