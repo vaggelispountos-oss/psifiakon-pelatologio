@@ -1,12 +1,13 @@
 // components/RentalVehiclePicker.jsx
 // 1ος Χρόνος για Ενοικιάσεις — αντί για κάμερα/OCR, ο χρήστης βλέπει ΜΙΑ λίστα
 // με τα διαθέσιμα οχήματα του στόλου του (δες tab «Οχήματα» / FleetVehicles.jsx)
-// και πατάει πάνω σε αυτό που παραδίδει. Ο στόλος είναι σταθερός/λίγα οχήματα
-// — μια λίστα με κλικ είναι πιο γρήγορη από dropdown. Οχήματα που έχουν ήδη
-// ανοιχτή ενοικίαση εμφανίζονται ως μη διαθέσιμα και δεν επιλέγονται — το
-// backend το επιβάλλει ούτως ή άλλως (create_entry: 400 αν η πινακίδα δεν
-// ανήκει στον στόλο), εδώ απλά δεν αφήνουμε τον χρήστη να διαλέξει κάτι εκτός
-// λίστας ή κάτι ήδη σε κίνηση.
+// και πατάει πάνω σε αυτό που παραδίδει. Δύο ρητά βήματα αντί για ένα σελίδα
+// που μεγαλώνει καθώς επιλέγεις: 1) διάλεξε όχημα (grid, ένα tap) 2) στοιχεία
+// παράδοσης. Ο στόλος είναι σταθερός/λίγα οχήματα — μια λίστα με κλικ είναι
+// πιο γρήγορη από dropdown. Οχήματα που έχουν ήδη ανοιχτή ενοικίαση
+// εμφανίζονται ως μη διαθέσιμα και δεν επιλέγονται — το backend το επιβάλλει
+// ούτως ή άλλως (create_entry: 400 αν η πινακίδα δεν ανήκει στον στόλο), εδώ
+// απλά δεν αφήνουμε τον χρήστη να διαλέξει κάτι εκτός λίστας ή σε κίνηση.
 import { useEffect, useMemo, useState } from "react";
 import { getFleetVehicles } from "../services/api";
 import { VEHICLE_CATEGORIES, VEHICLE_MOVEMENT_PURPOSES } from "../constants";
@@ -14,17 +15,27 @@ import { VEHICLE_CATEGORIES, VEHICLE_MOVEMENT_PURPOSES } from "../constants";
 // Καταστάσεις που σημαίνουν "το όχημα είναι έξω, δεν έχει επιστραφεί ακόμα".
 const ACTIVE_RENTAL_STATUSES = new Set(["open", "in_progress"]);
 
+// Σκοπός Κίνησης Οχήματος: η "Ενοικίαση" (1) καλύπτει σχεδόν όλες τις
+// παραδόσεις — προεπιλέγεται, ο χρήστης το αλλάζει μόνο στην σπάνια
+// περίπτωση Ιδιόχρησης/Δωρεάν Υπηρεσίας (πίσω από «Περισσότερα»).
+const DEFAULT_MOVEMENT_PURPOSE = "1";
+
+// Γρήγορες επιλογές διάρκειας — πληκτρολόγηση αριθμού σε κινητό είναι αργή.
+const DAY_CHIPS = [1, 2, 3, 7];
+
 export default function RentalVehiclePicker({ onConfirm, disabled, entries }) {
   const [vehicles, setVehicles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [activeCategory, setActiveCategory] = useState(null);
 
-  const [plate, setPlate] = useState("");
-  const [movementPurpose, setMovementPurpose] = useState("");
+  const [selected, setSelected] = useState(null); // επιλεγμένο όχημα (βήμα 2)
+  const [renterName, setRenterName] = useState("");
+  const [movementPurpose, setMovementPurpose] = useState(DEFAULT_MOVEMENT_PURPOSE);
   const [diffPickupLocation, setDiffPickupLocation] = useState(false);
   const [pickupLocation, setPickupLocation] = useState("");
   const [expectedDays, setExpectedDays] = useState("");
+  const [showMore, setShowMore] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -98,19 +109,16 @@ export default function RentalVehiclePicker({ onConfirm, disabled, entries }) {
 
   function handleSelect(v) {
     if (disabled) return;
-    setPlate(v.plate);
+    setSelected(v);
+    setError("");
+  }
+
+  function handleBack() {
+    setSelected(null);
     setError("");
   }
 
   function handleConfirm() {
-    if (!plate) {
-      setError("Επίλεξε όχημα από τη λίστα.");
-      return;
-    }
-    if (!movementPurpose) {
-      setError("Επίλεξε Σκοπό Κίνησης Οχήματος.");
-      return;
-    }
     if (diffPickupLocation && !pickupLocation.trim()) {
       setError("Συμπλήρωσε τον τόπο παραλαβής.");
       return;
@@ -120,7 +128,8 @@ export default function RentalVehiclePicker({ onConfirm, disabled, entries }) {
       return;
     }
     setError("");
-    onConfirm(plate, {
+    onConfirm(selected.plate, {
+      customerName: renterName.trim() || null,
       vehicleMovementPurpose: Number(movementPurpose),
       isDiffVehPickupLocation: diffPickupLocation,
       vehiclePickupLocation: diffPickupLocation ? pickupLocation.trim() : null,
@@ -128,6 +137,128 @@ export default function RentalVehiclePicker({ onConfirm, disabled, entries }) {
     });
   }
 
+  // ---- Βήμα 2: στοιχεία παράδοσης, μόλις επιλεγεί όχημα ----
+  if (selected) {
+    return (
+      <div className="card">
+        <button type="button" className="link-btn" onClick={handleBack} disabled={disabled}>
+          ← Αλλαγή οχήματος
+        </button>
+        <h2>
+          <span className="mono">{selected.plate}</span>
+          {selected.label ? ` · ${selected.label}` : ""}
+        </h2>
+
+        <label className="field-label">
+          Όνομα ενοικιαστή (προαιρετικό):
+          <input
+            className="input"
+            type="text"
+            value={renterName}
+            onChange={(e) => setRenterName(e.target.value)}
+            placeholder="π.χ. Γιώργος Παπαδόπουλος"
+            disabled={disabled}
+          />
+        </label>
+
+        <label className="field-label">Για πόσες μέρες; (προαιρετικό)</label>
+        <div className="day-chips">
+          {DAY_CHIPS.map((d) => (
+            <button
+              key={d}
+              type="button"
+              className={`day-chip${String(d) === expectedDays ? " is-selected" : ""}`}
+              onClick={() => setExpectedDays(String(d))}
+              disabled={disabled}
+            >
+              {d}
+            </button>
+          ))}
+          <input
+            className="input day-chip-custom"
+            type="number"
+            min="1"
+            step="1"
+            value={expectedDays}
+            onChange={(e) => setExpectedDays(e.target.value)}
+            placeholder="άλλο"
+            disabled={disabled}
+          />
+        </div>
+        <p className="muted small">
+          Δεν στέλνεται στην ΑΑΔΕ — χρησιμοποιείται μόνο για να σε
+          προειδοποιήσουμε αν το όχημα δεν έχει επιστραφεί όταν περάσουν οι
+          μέρες αυτές.
+        </p>
+
+        {!showMore ? (
+          <button
+            type="button"
+            className="link-btn"
+            onClick={() => setShowMore(true)}
+          >
+            ⌄ Περισσότερα (σκοπός κίνησης, τόπος παραλαβής)
+          </button>
+        ) : (
+          <>
+            <label className="field-label">
+              Σκοπός Κίνησης Οχήματος:
+              <select
+                className="input"
+                value={movementPurpose}
+                onChange={(e) => setMovementPurpose(e.target.value)}
+                disabled={disabled}
+              >
+                {VEHICLE_MOVEMENT_PURPOSES.map((p) => (
+                  <option key={p.value} value={p.value}>
+                    {p.value} — {p.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="field-label field-checkbox">
+              <input
+                type="checkbox"
+                checked={diffPickupLocation}
+                onChange={(e) => setDiffPickupLocation(e.target.checked)}
+                disabled={disabled}
+              />
+              Διαφορετικός τόπος παραλαβής οχήματος
+            </label>
+
+            {diffPickupLocation && (
+              <label className="field-label">
+                Τόπος Παραλαβής:
+                <input
+                  className="input"
+                  type="text"
+                  value={pickupLocation}
+                  onChange={(e) => setPickupLocation(e.target.value)}
+                  placeholder="π.χ. Αεροδρόμιο Ηρακλείου"
+                  disabled={disabled}
+                />
+              </label>
+            )}
+          </>
+        )}
+
+        {error && <div className="alert alert-error">{error}</div>}
+
+        <div className="sticky-cta">
+          <button
+            className="btn btn-primary btn-block"
+            onClick={handleConfirm}
+            disabled={disabled}
+          >
+            ➕ Παράδοση οχήματος
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ---- Βήμα 1: επιλογή οχήματος ----
   return (
     <div className="card">
       <h2>Παραλαβή οχήματος</h2>
@@ -155,7 +286,6 @@ export default function RentalVehiclePicker({ onConfirm, disabled, entries }) {
                 className={`vehicle-category-tab ${activeCategory === c.value ? "vehicle-category-tab-active" : ""}`}
                 onClick={() => {
                   setActiveCategory(c.value);
-                  setPlate("");
                   setError("");
                 }}
                 disabled={disabled}
@@ -173,12 +303,12 @@ export default function RentalVehiclePicker({ onConfirm, disabled, entries }) {
             </div>
           )}
 
-          <div className="vehicle-picker-list">
+          <div className="vehicle-picker-grid">
             {availableInCategory.map((v) => (
               <button
                 key={v.id}
                 type="button"
-                className={`vehicle-pick-btn vehicle-pick-btn-available ${plate === v.plate ? "vehicle-pick-btn-active" : ""}`}
+                className="vehicle-pick-btn vehicle-pick-btn-available"
                 onClick={() => handleSelect(v)}
                 disabled={disabled}
               >
@@ -193,7 +323,7 @@ export default function RentalVehiclePicker({ onConfirm, disabled, entries }) {
               <p className="muted small" style={{ marginTop: 20 }}>
                 Σε ενοικίαση τώρα (μη διαθέσιμα):
               </p>
-              <div className="vehicle-picker-list">
+              <div className="vehicle-picker-grid">
                 {unavailableInCategory.map((v) => {
                   const overdue = overduePlates.has(v.plate);
                   return (
@@ -210,83 +340,7 @@ export default function RentalVehiclePicker({ onConfirm, disabled, entries }) {
             </>
           )}
 
-          {plate && (
-            <>
-              <label className="field-label" style={{ marginTop: 16 }}>
-                Σκοπός Κίνησης Οχήματος:
-                <select
-                  className="input"
-                  value={movementPurpose}
-                  onChange={(e) => setMovementPurpose(e.target.value)}
-                  disabled={disabled}
-                >
-                  <option value="">— Επίλεξε —</option>
-                  {VEHICLE_MOVEMENT_PURPOSES.map((p) => (
-                    <option key={p.value} value={p.value}>
-                      {p.value} — {p.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="field-label field-checkbox">
-                <input
-                  type="checkbox"
-                  checked={diffPickupLocation}
-                  onChange={(e) => setDiffPickupLocation(e.target.checked)}
-                  disabled={disabled}
-                />
-                Διαφορετικός τόπος παραλαβής οχήματος
-              </label>
-
-              {diffPickupLocation && (
-                <label className="field-label">
-                  Τόπος Παραλαβής:
-                  <input
-                    className="input"
-                    type="text"
-                    value={pickupLocation}
-                    onChange={(e) => setPickupLocation(e.target.value)}
-                    placeholder="π.χ. Αεροδρόμιο Ηρακλείου"
-                    disabled={disabled}
-                  />
-                </label>
-              )}
-
-              <label className="field-label">
-                Για πόσες μέρες; (προαιρετικό)
-                <input
-                  className="input"
-                  type="number"
-                  min="1"
-                  step="1"
-                  value={expectedDays}
-                  onChange={(e) => setExpectedDays(e.target.value)}
-                  placeholder="π.χ. 2"
-                  disabled={disabled}
-                />
-              </label>
-              <p className="muted small">
-                Δεν στέλνεται στην ΑΑΔΕ — χρησιμοποιείται μόνο για να σε
-                προειδοποιήσουμε αν το όχημα δεν έχει επιστραφεί όταν περάσουν
-                οι μέρες αυτές.
-              </p>
-            </>
-          )}
-
           {error && <div className="alert alert-error">{error}</div>}
-
-          {plate && (
-            <div className="sticky-cta">
-              <button
-                className="btn btn-primary btn-block"
-                onClick={handleConfirm}
-                disabled={disabled}
-              >
-                ➕ Παράδοση οχήματος
-              </button>
-            </div>
-          )}
         </>
       )}
 
