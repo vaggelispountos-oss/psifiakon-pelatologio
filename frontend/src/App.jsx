@@ -29,18 +29,17 @@ import ServiceForm from "./components/ServiceForm";
 import ExitForm from "./components/ExitForm";
 import QrScanner from "./components/QrScanner";
 import EntriesList from "./components/EntriesList";
-import CustomerDatabase from "./components/CustomerDatabase";
-import FleetVehicles from "./components/FleetVehicles";
-import HistoryLog from "./components/HistoryLog";
+import Archive from "./components/Archive";
 import OcrStats from "./components/OcrStats";
 import { SettingsAccordion } from "./components/SettingsPanel";
 import Login from "./components/Login";
 import { PrivacyPolicy, TermsOfService } from "./components/LegalPages";
 import ResetPassword from "./components/ResetPassword";
 
-// Τα 3 πρώτα tabs δείχνουν όλα την ΙΔΙΑ λίστα εγγραφών, απλά ομαδοποιημένη
-// διαφορετικά — το `hint` εξηγεί ΤΙ διαφορετικό δείχνει το καθένα, γιατί
-// χωρίς αυτό δεν είναι προφανές πού να ψάξεις κάτι.
+// Πελάτες/Ιστορικό/Οχήματα ήταν 3 ξεχωριστά tabs που έδειχναν την ΙΔΙΑ λίστα
+// εγγραφών, απλά ομαδοποιημένη διαφορετικά — μπερδεμένο ΠΟΙΟ tab έχει τι
+// χωρίς να διαβάσεις hint. Τώρα είναι ΕΝΑ tab «Αρχείο» με εσωτερικό
+// segmented control (δες components/Archive.jsx).
 const TABS = [
   { id: "flow", label: "Λειτουργία" },
   {
@@ -49,20 +48,9 @@ const TABS = [
     hint: "Ενεργές εργασίες — δράσε πάνω σε ανοιχτά οχήματα",
   },
   {
-    id: "customers",
-    label: "Πελάτες",
-    hint: "Ανά πινακίδα — πόσες φορές έχει έρθει κάθε όχημα",
-  },
-  {
-    id: "history",
-    label: "Ιστορικό",
-    hint: "Χρονολογικό αρχείο + αναλυτικές κλήσεις ΑΑΔΕ ανά επίσκεψη",
-  },
-  {
-    id: "fleet",
-    label: "Οχήματα",
-    hint: "Ο στόλος σου — μόνο αυτές τις πινακίδες μπορείς να ενοικιάσεις",
-    rentalOnly: true,
+    id: "archive",
+    label: "Αρχείο",
+    hint: "Πελάτες, ιστορικό επισκέψεων και ο στόλος σου",
   },
   { id: "settings", label: "Ρυθμίσεις" },
 ];
@@ -166,6 +154,10 @@ export default function App() {
 function AuthenticatedApp({ workshop, onLogout, onWorkshopUpdated }) {
   const isRental = workshop?.businessType === "rental";
   const [tab, setTab] = useState("flow");
+  // Ποια εσωτερική προβολή του tab «Αρχείο» είναι ενεργή — ελεγχόμενο εδώ
+  // (όχι τοπικό state μέσα στο Archive) ώστε το «Λεπτομέρειες» στο tab
+  // «Εγγραφές» να μπορεί να ανοίξει κατευθείαν στο Ιστορικό.
+  const [archiveView, setArchiveView] = useState("customers");
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -368,7 +360,8 @@ function AuthenticatedApp({ workshop, onLogout, onWorkshopUpdated }) {
   function handleActOnEntry(entry, requestedStage) {
     if (requestedStage === "details") {
       setActiveEntryId(entry.id);
-      setTab("history");
+      setArchiveView("history");
+      setTab("archive");
       return;
     }
     setActiveEntryId(entry.id);
@@ -568,17 +561,16 @@ function AuthenticatedApp({ workshop, onLogout, onWorkshopUpdated }) {
             isRental={isRental}
           />
         )}
-        {tab === "customers" && (
-          <CustomerDatabase
+        {tab === "archive" && (
+          <Archive
+            view={archiveView}
+            onViewChange={setArchiveView}
             entries={entries}
             loading={loading}
             onRefresh={refresh}
+            isRental={isRental}
           />
         )}
-        {tab === "history" && (
-          <HistoryLog entries={entries} loading={loading} onRefresh={refresh} />
-        )}
-        {tab === "fleet" && isRental && <FleetVehicles entries={entries} />}
         {tab === "ocr-stats" && <OcrStats />}
         {tab === "settings" && (
           <SettingsAccordion
