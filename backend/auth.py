@@ -26,6 +26,7 @@ from flask_jwt_extended import (
     JWTManager,
     create_access_token,
     create_refresh_token,
+    get_jwt,
     get_jwt_identity,
     jwt_required,
     verify_jwt_in_request,
@@ -68,6 +69,18 @@ BUSINESS_TYPES = {"garage", "rental"}
 ACTIVE_STATUSES = {"trial", "active"}
 
 
+def _epoch_mismatch_response():
+    return (
+        jsonify(
+            {
+                "error": "Η σύνδεση δεν ισχύει πια (άλλαξε ο κωδικός σε άλλη συσκευή/session) — ξανασυνδέσου.",
+                "reason": "token_epoch_mismatch",
+            }
+        ),
+        401,
+    )
+
+
 def require_auth(fn):
     """Decorator: απαιτεί έγκυρο access token ΚΑΙ ενεργή συνδρομή, θέτει g.workshop_id."""
 
@@ -78,6 +91,11 @@ def require_auth(fn):
         workshop = Workshop.query.get(workshop_id)
         if workshop is None:
             return jsonify({"error": "Δεν βρέθηκε ο λογαριασμός."}), 401
+        # Ανάκληση tokens: αν το "ep" claim του access token δεν ταιριάζει
+        # με το τρέχον token_epoch, ο κωδικός άλλαξε ΜΕΤΑ την έκδοση αυτού
+        # του token — ΔΕΝ το εμπιστευόμαστε, ακόμη κι αν δεν έχει λήξει.
+        if get_jwt().get("ep") != workshop.token_epoch:
+            return _epoch_mismatch_response()
         if workshop.subscription_status not in ACTIVE_STATUSES:
             return (
                 jsonify(
@@ -200,6 +218,14 @@ def login():
 @jwt_required(refresh=True)
 def refresh():
     identity = get_jwt_identity()
+    workshop = Workshop.query.get(int(identity))
+    # ΙΔΙΟΣ έλεγχος epoch με το require_auth — χωρίς αυτό, ένα ΚΛΕΜΜΕΝΟ
+    # refresh token θα μπορούσε να κόψει ΝΕΟ access token με το ΤΡΕΧΟΝ
+    # epoch (το additional_claims_loader διαβάζει πάντα το current value),
+    # ακυρώνοντας εντελώς τον σκοπό της ανάκλησης — το κλεμμένο refresh
+    # token ζει 30 μέρες.
+    if workshop is None or get_jwt().get("ep") != workshop.token_epoch:
+        return _epoch_mismatch_response()
     return jsonify({"accessToken": create_access_token(identity=identity)})
 
 
@@ -418,6 +444,14 @@ def init_auth(app):
     limiter.init_app(app)
     app.register_blueprint(auth_bp)
     app.register_blueprint(admin_bp)
+
+    @jwt.additional_claims_loader
+    def _add_token_epoch_claim(identity):
+        """Μπαίνει σε ΚΑΘΕ νέο token (access ΚΑΙ refresh — καλείται από τα
+        create_access_token/create_refresh_token). Δες require_auth/refresh
+        για το πού ελέγχεται."""
+        workshop = Workshop.query.get(int(identity))
+        return {"ep": workshop.token_epoch if workshop else 0}
 
     @jwt.unauthorized_loader
     def _unauthorized(reason):

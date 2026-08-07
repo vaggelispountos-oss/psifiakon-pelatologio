@@ -50,9 +50,18 @@ class Workshop(db.Model):
     # auth.register). Nullable για παλιά workshops πριν τη στήλη — το
     # require_auth πέφτει τότε σε created_at + TRIAL_DAYS (δες auth.py).
     trial_ends_at = db.Column(db.DateTime, nullable=True)
+    # Αυξάνεται σε ΚΑΘΕ set_password() (εγγραφή, αλλαγή, reset). Μπαίνει ως
+    # custom claim ("ep") σε κάθε νέο JWT (access ΚΑΙ refresh, δες auth.py
+    # additional_claims_loader) — το require_auth/refresh απορρίπτουν
+    # tokens με παλιό "ep". Χωρίς αυτό, ένα κλεμμένο access/refresh token
+    # παραμένει έγκυρο ΑΚΟΜΗ ΚΑΙ μετά από αλλαγή κωδικού (το refresh token
+    # ζει 30 μέρες) — ο ιδιοκτήτης δεν έχει κανέναν τρόπο να «διώξει» τον
+    # επιτιθέμενο.
+    token_epoch = db.Column(db.Integer, default=0, nullable=False)
 
     def set_password(self, raw_password):
         self.password_hash = generate_password_hash(raw_password)
+        self.token_epoch = (self.token_epoch or 0) + 1
 
     def check_password(self, raw_password):
         return check_password_hash(self.password_hash, raw_password)
