@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 import requests
 from flask import Flask, current_app, g, jsonify, request
 from flask_cors import CORS
+from sqlalchemy import case, func
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from auth import init_auth, limiter, require_auth, workshop_key
@@ -1398,20 +1399,38 @@ def register_routes(app):
     @app.route("/api/ocr/metrics/summary", methods=["GET"])
     @require_auth
     def ocr_metrics_summary():
-        rows = OcrMetric.query.filter_by(workshop_id=g.workshop_id).all()
-        total = len(rows)
-        successes = sum(1 for r in rows if r.ocr_plate)
-        confirmed = [r for r in rows if r.confirmed]
-        user_edited = sum(1 for r in confirmed if r.user_edited)
-        confidences = [r.confidence for r in rows if r.confidence is not None]
-        parser_corrected = sum(1 for r in rows if r.parser_corrected)
+        # Μία γραμμή ΑΝΑ σάρωση πινακίδας -> ο πίνακας μεγαλώνει πολύ πιο
+        # γρήγορα από τις εγγραφές (πολλαπλές προσπάθειες ανά όχημα). Τα
+        # aggregates γίνονται στη ΒΑΣΗ: το προηγούμενο .all() + Python loops
+        # φόρτωνε ΚΑΘΕ σάρωση που έγινε ποτέ, στη μνήμη, σε κάθε άνοιγμα του
+        # tab (δεκάδες χιλιάδες γραμμές/χρόνο για ένα ενεργό συνεργείο).
+        scoped = db.session.query(OcrMetric).filter_by(workshop_id=g.workshop_id)
 
-        def group_counts(key_fn):
-            out = {}
-            for r in rows:
-                k = key_fn(r)
-                out[k] = out.get(k, 0) + 1
-            return out
+        total, successes, parser_corrected, avg_confidence = scoped.with_entities(
+            func.count(OcrMetric.id),
+            func.count(OcrMetric.ocr_plate),  # COUNT(col) αγνοεί τα NULL
+            func.sum(case((OcrMetric.parser_corrected.is_(True), 1), else_=0)),
+            func.avg(OcrMetric.confidence),
+        ).one()
+
+        confirmed, user_edited = scoped.filter(
+            OcrMetric.confirmed.is_(True)
+        ).with_entities(
+            func.count(OcrMetric.id),
+            func.sum(case((OcrMetric.user_edited.is_(True), 1), else_=0)),
+        ).one()
+
+        # SUM() γυρνά NULL (όχι 0) όταν δεν υπάρχουν γραμμές.
+        parser_corrected = int(parser_corrected or 0)
+        user_edited = int(user_edited or 0)
+
+        def group_counts(column):
+            return {
+                key: count
+                for key, count in scoped.with_entities(
+                    column, func.count(OcrMetric.id)
+                ).group_by(column)
+            }
 
         return jsonify(
             {
@@ -1419,17 +1438,17 @@ def register_routes(app):
                 "successes": successes,
                 "failures": total - successes,
                 "successRate": round(successes / total * 100, 1) if total else None,
-                "confirmed": len(confirmed),
+                "confirmed": confirmed,
                 "userEdited": user_edited,
-                "userEditedRate": round(user_edited / len(confirmed) * 100, 1)
+                "userEditedRate": round(user_edited / confirmed * 100, 1)
                 if confirmed
                 else None,
                 "parserCorrected": parser_corrected,
-                "avgConfidence": round(sum(confidences) / len(confidences), 1)
-                if confidences
+                "avgConfidence": round(float(avg_confidence), 1)
+                if avg_confidence is not None
                 else None,
-                "byEngine": group_counts(lambda r: r.engine),
-                "byMode": group_counts(lambda r: r.mode),
+                "byEngine": group_counts(OcrMetric.engine),
+                "byMode": group_counts(OcrMetric.mode),
             }
         )
 
