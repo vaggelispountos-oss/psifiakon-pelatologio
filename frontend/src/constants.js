@@ -72,20 +72,23 @@ export const REASON_NON_ISSUE_TYPES = [
   { value: 3, label: "Αποζημίωση Παροχής Εγγύησης" },
 ];
 
-// Ετικέτες κατάστασης (status) εγγραφής + σε ποιον «Χρόνο» αντιστοιχεί
+// Ετικέτες κατάστασης (status) εγγραφής — απλή, κατανοητή γλώσσα (ο αριθμός
+// του «Χρόνου» ΑΑΔΕ φαίνεται μόνο στο Stepper και στο tab «Ιστορικό»).
 export const STATUS_LABELS = {
-  open: { text: "Ανοιχτή (1ος Χρόνος)", color: "#2563eb" },
-  in_progress: { text: "Σε εξέλιξη (2ος Χρόνος)", color: "#d97706" },
-  completed: { text: "Ολοκληρωμένη (3ος Χρόνος)", color: "#7c3aed" },
-  correlated: { text: "Συσχετισμένη (4ος Χρόνος)", color: "#16a34a" },
+  open: { text: "Μπήκε", color: "#2563eb" },
+  in_progress: { text: "Σε εξέλιξη", color: "#d97706" },
+  completed: { text: "Ολοκληρωμένη", color: "#7c3aed" },
+  correlated: { text: "Συσχετισμένη", color: "#16a34a" },
   cancelled: { text: "Ακυρωμένη", color: "#6b7280" },
 };
 
 // Ενοικιάσεις: ΔΕΝ έχουν 2ο Χρόνο (κατηγορία υπηρεσίας) — 3 Χρόνοι αντί για 4.
+// Το "open" σημαίνει «το όχημα είναι έξω», όχι «μπήκε».
 export const STATUS_LABELS_RENTAL = {
   ...STATUS_LABELS,
-  completed: { text: "Ολοκληρωμένη (2ος Χρόνος)", color: "#7c3aed" },
-  correlated: { text: "Συσχετισμένη (3ος Χρόνος)", color: "#16a34a" },
+  open: { text: "Έξω", color: "#2563eb" },
+  completed: { text: "Επιστράφηκε", color: "#7c3aed" },
+  correlated: { text: "Συσχετισμένη", color: "#16a34a" },
 };
 
 export function serviceCategoryLabel(value) {

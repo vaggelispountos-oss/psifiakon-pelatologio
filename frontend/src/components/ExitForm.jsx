@@ -52,7 +52,7 @@ export default function ExitForm({ onSubmit, disabled, isRental }) {
 
   return (
     <form className="card" onSubmit={handleSubmit}>
-      <h2>{isRental ? "2ος Χρόνος — Ολοκλήρωση Ενοικίασης" : "3ος Χρόνος — Ολοκλήρωση"}</h2>
+      <h2>{isRental ? "Ολοκλήρωση Ενοικίασης" : "Ολοκλήρωση"}</h2>
       <p className="muted">
         {isRental
           ? "Επίλεξε είδος παραστατικού (ή «Δεν εκδίδεται παραστατικό» για Ιδιόχρηση/Δωρεάν Υπηρεσία) για να ολοκληρωθεί η ενοικίαση."
@@ -148,7 +148,7 @@ export default function ExitForm({ onSubmit, disabled, isRental }) {
       {error && <div className="alert alert-error">{error}</div>}
 
       <button className="btn btn-primary btn-block" disabled={disabled}>
-        Ολοκλήρωση (UpdateClient / entryCompletion)
+        Ολοκλήρωση
       </button>
     </form>
   );

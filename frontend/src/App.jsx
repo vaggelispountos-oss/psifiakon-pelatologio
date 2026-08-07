@@ -22,6 +22,7 @@ import {
 } from "./services/api";
 import { STATUS_LABELS, STATUS_LABELS_RENTAL } from "./constants";
 import CameraCapture from "./components/CameraCapture";
+import Stepper from "./components/Stepper";
 import RentalVehiclePicker from "./components/RentalVehiclePicker";
 import ServiceForm from "./components/ServiceForm";
 import ExitForm from "./components/ExitForm";
@@ -385,14 +386,19 @@ function AuthenticatedApp({ workshop, onLogout, onWorkshopUpdated }) {
           </div>
         );
       }
-      return isRental ? (
-        <RentalVehiclePicker
-          onConfirm={handleCreateEntry}
-          disabled={busy}
-          entries={entries}
-        />
-      ) : (
-        <CameraCapture onConfirm={handleCreateEntry} disabled={busy} isRental={isRental} />
+      return (
+        <>
+          <Stepper status={null} isRental={isRental} />
+          {isRental ? (
+            <RentalVehiclePicker
+              onConfirm={handleCreateEntry}
+              disabled={busy}
+              entries={entries}
+            />
+          ) : (
+            <CameraCapture onConfirm={handleCreateEntry} disabled={busy} isRental={isRental} />
+          )}
+        </>
       );
     }
 
@@ -401,6 +407,7 @@ function AuthenticatedApp({ workshop, onLogout, onWorkshopUpdated }) {
 
     return (
       <>
+        <Stepper status={activeEntry.status} isRental={isRental} />
         <div className="card active-entry">
           <div className="list-header">
             <h2>Ενεργή εγγραφή</h2>
@@ -408,7 +415,7 @@ function AuthenticatedApp({ workshop, onLogout, onWorkshopUpdated }) {
               className="btn btn-ghost btn-sm"
               onClick={() => setActiveEntryId(null)}
             >
-              ✕ Νέα εγγραφή
+              Κλείσιμο
             </button>
           </div>
           <div className="kv">
@@ -483,18 +490,14 @@ function AuthenticatedApp({ workshop, onLogout, onWorkshopUpdated }) {
           {isRental ? "🚗 Ψηφιακό Πελατολόγιο Ενοικιάσεων" : "🔧 Ψηφιακό Πελατολόγιο"}
         </div>
         <div className="topbar-right">
-          <button
-            className="btn btn-primary btn-sm btn-new-vehicle"
-            onClick={handleNewVehicle}
-          >
-            ＋ Νέο όχημα
-          </button>
-          <div
-            className={`health health-${health}`}
-            title={`Backend: ${API_URL}`}
-          >
-            {health === "ok" ? "● Online" : health === "down" ? "● Offline" : "…"}
-          </div>
+          {health === "down" && (
+            <div
+              className={`health health-${health}`}
+              title={`Backend: ${API_URL}`}
+            >
+              ● Offline
+            </div>
+          )}
           <span className="muted" title={workshop?.email}>
             {workshop?.name}
           </span>
@@ -524,7 +527,9 @@ function AuthenticatedApp({ workshop, onLogout, onWorkshopUpdated }) {
       )}
 
       {toast && (
-        <div className={`alert alert-${toast.type === "error" ? "error" : "info"} banner`}>
+        <div
+          className={`alert alert-${toast.type === "error" ? "error" : "info"} toast-float`}
+        >
           {toast.text}
         </div>
       )}
@@ -537,7 +542,6 @@ function AuthenticatedApp({ workshop, onLogout, onWorkshopUpdated }) {
             loading={loading}
             onAct={handleActOnEntry}
             onRefresh={refresh}
-            onNewVehicle={handleNewVehicle}
             isRental={isRental}
           />
         )}
@@ -562,6 +566,19 @@ function AuthenticatedApp({ workshop, onLogout, onWorkshopUpdated }) {
           />
         )}
       </main>
+
+      {/* Ένα και μοναδικό σημείο για «νέο όχημα» σε όλη την εφαρμογή —
+          κρύβεται μόνο όταν ο χρήστης βρίσκεται ήδη σε αυτή την οθόνη. */}
+      {!(tab === "flow" && !activeEntry) && (
+        <button
+          className="fab"
+          onClick={handleNewVehicle}
+          title="Νέο όχημα"
+          aria-label="Νέο όχημα"
+        >
+          ＋
+        </button>
+      )}
     </div>
   );
 }

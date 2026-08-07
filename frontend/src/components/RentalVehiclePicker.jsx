@@ -130,7 +130,7 @@ export default function RentalVehiclePicker({ onConfirm, disabled, entries }) {
 
   return (
     <div className="card">
-      <h2>1ος Χρόνος — Παραλαβή οχήματος</h2>
+      <h2>Παραλαβή οχήματος</h2>
       <p className="muted">
         Πάτησε το όχημα που παραδίδεις. Για να προσθέσεις νέο όχημα, πήγαινε
         στο tab «Οχήματα».
@@ -283,7 +283,7 @@ export default function RentalVehiclePicker({ onConfirm, disabled, entries }) {
                 onClick={handleConfirm}
                 disabled={disabled}
               >
-                ➕ Δημιουργία εγγραφής (SendClient)
+                ➕ Παράδοση οχήματος
               </button>
             </div>
           )}

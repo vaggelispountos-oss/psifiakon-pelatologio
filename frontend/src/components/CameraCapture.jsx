@@ -694,7 +694,7 @@ export default function CameraCapture({ onConfirm, disabled, isRental }) {
 
   return (
     <div className="card">
-      <h2>1ος Χρόνος — {isRental ? "Παραλαβή οχήματος" : "Είσοδος οχήματος"}</h2>
+      <h2>{isRental ? "Παραλαβή οχήματος" : "Είσοδος οχήματος"}</h2>
       <p className="muted">
         Διάλεξε τύπο οχήματος και ευθυγράμμισε την πλάκα μέσα στο πλαίσιο· θα
         γίνει ΠΡΑΣΙΝΟ όταν φαίνεται καθαρά και σκανάρει μόνη της. Ακολούθησε
@@ -1004,7 +1004,7 @@ export default function CameraCapture({ onConfirm, disabled, isRental }) {
             ? "🔒 Επιβεβαίωσε την πινακίδα παραπάνω"
             : isPerfect
             ? "✓ Δημιουργία εγγραφής"
-            : "➕ Δημιουργία εγγραφής (SendClient)"}
+            : "➕ Δημιουργία εγγραφής"}
         </button>
       </div>
     </div>

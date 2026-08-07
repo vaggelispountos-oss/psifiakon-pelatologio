@@ -90,7 +90,7 @@ export default function QrScanner({ onCorrelate, disabled, isRental }) {
 
   return (
     <div className="card">
-      <h2>{isRental ? "3ος Χρόνος" : "4ος Χρόνος"} — Συσχέτιση ΜΑΡΚ</h2>
+      <h2>Συσχέτιση ΜΑΡΚ</h2>
       <p className="muted">
         Σκάναρε το QR της απόδειξης. Αν δεν διαβαστεί σωστά, γράψε τον ΜΑΡΚ
         χειροκίνητα.

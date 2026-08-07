@@ -60,7 +60,6 @@ export default function EntriesList({
   loading,
   onAct,
   onRefresh,
-  onNewVehicle,
   isRental,
 }) {
   const nextActionMap = isRental ? NEXT_ACTION_RENTAL : NEXT_ACTION;
@@ -243,12 +242,6 @@ export default function EntriesList({
           με ΑΑΔΕ… (πιάνει αλλαγές που έγιναν από αλλού, π.χ. λογιστικό
           λογισμικό ή απευθείας στην ΑΑΔΕ)
         </div>
-      )}
-
-      {onNewVehicle && (
-        <button className="btn btn-primary btn-block" onClick={onNewVehicle}>
-          ＋ Νέο όχημα (νέος πελάτης)
-        </button>
       )}
 
       {/* Μετρητές εκκρεμοτήτων */}

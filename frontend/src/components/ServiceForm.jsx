@@ -33,7 +33,7 @@ export default function ServiceForm({ onSubmit, disabled }) {
 
   return (
     <form className="card" onSubmit={handleSubmit}>
-      <h2>2ος Χρόνος — Κατηγορία εργασίας</h2>
+      <h2>Κατηγορία εργασίας</h2>
 
       <label className="field-label">
         Κατηγορία Παρεχόμενης Υπηρεσίας:
@@ -77,7 +77,7 @@ export default function ServiceForm({ onSubmit, disabled }) {
       {error && <div className="alert alert-error">{error}</div>}
 
       <button className="btn btn-primary btn-block" disabled={disabled}>
-        Καταχώρηση εργασίας (UpdateClient)
+        Καταχώρηση εργασίας
       </button>
     </form>
   );
