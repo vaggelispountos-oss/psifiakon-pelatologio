@@ -127,6 +127,13 @@ def test_customers_isolated_between_workshops():
         list_a = c.get("/api/customers", headers=_auth(token_a))
         assert len(list_a.get_json()) == 1
 
+        plates_b = c.get("/api/customers/plates", headers=_auth(token_b))
+        assert plates_b.status_code == 200
+        assert plates_b.get_json() == []
+
+        plates_a = c.get("/api/customers/plates", headers=_auth(token_a))
+        assert plates_a.get_json() == [{"plate": "XYZ5678", "name": "Secret Customer A"}]
+
         patch_b = c.patch(
             f"/api/customers/{customer_id}",
             json={"name": "hijacked"},

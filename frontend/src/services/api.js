@@ -409,6 +409,12 @@ export function getCustomers(q = "") {
   return request(`/api/customers${qs}`);
 }
 
+// Ελαφριά εκδοχή (μόνο plate/name) — για το "μήπως εννοείς" στο
+// CameraCapture, που φορτώνει σε κάθε άνοιγμα κάμερας.
+export function getCustomerPlates() {
+  return request("/api/customers/plates");
+}
+
 export function updateCustomer(id, { name, vat, phone }) {
   return request(`/api/customers/${id}`, {
     method: "PATCH",

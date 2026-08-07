@@ -22,6 +22,7 @@ import requests
 from flask import Flask, current_app, g, jsonify, request
 from flask_cors import CORS
 from sqlalchemy import case, func
+from sqlalchemy.orm import selectinload
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from auth import init_auth, limiter, require_auth, workshop_key
@@ -708,6 +709,21 @@ def register_routes(app):
         customers = query.order_by(Customer.plate.asc()).all()
         return jsonify([c.to_dict() for c in customers])
 
+    # Ελαφριά εκδοχή του παραπάνω: ΜΟΝΟ plate/name, όχι όλο το Customer
+    # (vat, phone, vehicleCategory, ...). Το CameraCapture τη φορτώνει σε
+    # ΚΑΘΕ άνοιγμα κάμερας για το "μήπως εννοείς" — δεν χρειάζεται τίποτα
+    # παραπάνω από αυτά τα δύο πεδία, οπότε with_entities() ώστε η SQL να
+    # μη διαβάζει/επιστρέφει τις υπόλοιπες στήλες.
+    @app.route("/api/customers/plates", methods=["GET"])
+    @require_auth
+    def list_customer_plates():
+        rows = (
+            Customer.query.filter_by(workshop_id=g.workshop_id)
+            .with_entities(Customer.plate, Customer.name)
+            .all()
+        )
+        return jsonify([{"plate": plate, "name": name} for plate, name in rows])
+
     @app.route("/api/customers/<int:customer_id>", methods=["PATCH"])
     @require_auth
     def update_customer(customer_id):
@@ -826,7 +842,15 @@ def register_routes(app):
     def export_account():
         workshop = Workshop.query.get(g.workshop_id)
         customers = Customer.query.filter_by(workshop_id=g.workshop_id).all()
-        entries = DclEntry.query.filter_by(workshop_id=g.workshop_id).all()
+        # selectinload: 1 επιπλέον query για ΟΛΑ τα AadeLog των entries, αντί
+        # για ΕΝΑ query ανά entry (lazy=True default στο DclEntry.logs) —
+        # χωρίς αυτό, ένα συνεργείο με π.χ. 2000 entries κάνει 2000+1 queries
+        # εδώ και ρισκάρει timeout στο export.
+        entries = (
+            DclEntry.query.filter_by(workshop_id=g.workshop_id)
+            .options(selectinload(DclEntry.logs))
+            .all()
+        )
         settings = Settings.query.filter_by(workshop_id=g.workshop_id).first()
         return jsonify(
             {

@@ -8,7 +8,7 @@
 // --------------------------------------------------------------------
 import { useEffect, useRef, useState } from "react";
 import { getRecognizer, recognizerName } from "../services/plateRecognizer";
-import { logOcrAttempt, confirmOcrMetric, getCustomers } from "../services/api";
+import { logOcrAttempt, confirmOcrMetric, getCustomerPlates } from "../services/api";
 import { VEHICLE_MOVEMENT_PURPOSES } from "../constants";
 import {
   normalizePlateInput,
@@ -430,7 +430,7 @@ export default function CameraCapture({ onConfirm, disabled, isRental }) {
 
       // Φόρτωσε τις γνωστές πινακίδες (fire-and-forget) για το «μήπως εννοείς»
       // πρόταση διόρθωσης παρακάτω — δεν μπλοκάρει το άνοιγμα της κάμερας.
-      getCustomers()
+      getCustomerPlates()
         .then((customers) => {
           knownPlatesRef.current = customers || [];
         })
