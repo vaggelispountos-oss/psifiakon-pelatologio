@@ -169,6 +169,19 @@ body {
   color: var(--text);
   font-size: 1rem;
 }
+
+/* Πεδίο πινακίδας — μεγαλύτερο, μονοσπάτιο και κεντραρισμένο ώστε να
+   ελέγχεται εύκολα με μια ματιά (η πινακίδα μπορεί να έχει 3 ή 4 ψηφία,
+   άρα δεν είναι κουτάκι-ανά-χαρακτήρα εδώ, μόνο οπτική έμφαση). */
+.plate-input {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 1.3rem;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-align: center;
+  text-transform: uppercase;
+  padding: 14px 12px;
+}
 textarea.input {
   resize: vertical;
 }
@@ -215,6 +228,27 @@ textarea.input {
   width: 100%;
   margin-top: 14px;
 }
+
+/* Sticky CTA — το κύριο κουμπί ("Δημιουργία εγγραφής") μένει πάντα ορατό στο
+   κάτω μέρος της οθόνης αντί να χρειάζεται scroll για να το βρει ο χρήστης,
+   ειδικά αφού το viewfinder + τα status blocks μπορούν να γεμίσουν την
+   οθόνη σε μικρά κινητά. Το gradient πάνω από το κουμπί αποτρέπει το
+   περιεχόμενο να "κόβεται" απότομα κάτω από αυτό καθώς κάνει scroll. */
+.sticky-cta {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  margin: 14px -16px -16px;
+  padding: 18px 16px calc(14px + env(safe-area-inset-bottom));
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    var(--panel) 22%
+  );
+}
+.sticky-cta .btn-block {
+  margin-top: 0;
+}
 .btn-sm {
   padding: 8px 12px;
   font-size: 0.82rem;
@@ -250,16 +284,53 @@ textarea.input {
   white-space: nowrap;
 }
 
-/* OCR confidence */
-.ocr-info {
+/* Ενιαία κάρτα αποτελέσματος σάρωσης — φωτογραφία + βεβαιότητα + μηχανή +
+   επιφυλάξεις όλα μαζί, ΜΙΑ φορά, ώστε ο χρήστης να μην ελέγχει την ίδια
+   πληροφορία σε πολλά διαφορετικά σημεία της οθόνης. Το χρώμα του αριστερού
+   border ακολουθεί το confidence tier. */
+.scan-result {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--muted);
+  border-radius: 10px;
+}
+.scan-result-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.scan-result-thumb {
+  width: 64px;
+  height: 44px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: #fff;
+  flex-shrink: 0;
+}
+.scan-result-info {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
+}
+.scan-result-note {
   margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: 0.8rem;
+  color: #fbbf24;
 }
 .ocr-conf {
-  font-size: 0.88rem;
-  font-weight: 600;
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+.ocr-status-engine {
+  font-size: 0.76rem;
+  color: var(--muted);
+  white-space: nowrap;
 }
 
 /* Test connection */
@@ -344,12 +415,16 @@ textarea.input {
   margin: 10px 0 0;
 }
 
-/* Camera / QR */
+/* Camera / QR — 3:2 αντί για 4:3 (πιο κοντό), ΚΑΙ max-height στο viewfinder,
+   ώστε σε μικρές οθόνες να μη σπρώχνει το κουμπί δημιουργίας κάτω από το
+   fold. Το video έχει ήδη object-fit: cover, οπότε ένα κοντύτερο κουτί απλά
+   κόβει λίγο περισσότερο πάνω/κάτω χωρίς παραμόρφωση. */
 .camera-frame,
 .qr-region {
   position: relative;
   width: 100%;
-  aspect-ratio: 4 / 3;
+  aspect-ratio: 3 / 2;
+  max-height: 46vh;
   background: #000;
   border-radius: 10px;
   overflow: hidden;
@@ -387,30 +462,66 @@ textarea.input {
   color: var(--muted);
 }
 
-/* Επιλογή τύπου οχήματος — αλλάζει το σχήμα του πλαισίου-οδηγού */
+/* Επιλογή τύπου οχήματος — segmented control (ενιαίο "χάπι" με δύο
+   επιλογές) αντί για δύο ξεχωριστά outlined κουμπιά, πιο σαφές ποιο είναι
+   επιλεγμένο με μια ματιά. */
 .mode-toggle {
   display: flex;
-  gap: 8px;
+  gap: 3px;
   margin-top: 10px;
+  padding: 3px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
 }
 .mode-btn {
   flex: 1;
-  padding: 8px 10px;
+  padding: 10px 10px;
   font-size: 0.9rem;
+  font-weight: 600;
   color: var(--muted);
   background: transparent;
-  border: 1px solid var(--border);
+  border: none;
   border-radius: 8px;
   cursor: pointer;
 }
 .mode-btn.is-active {
-  color: #4ade80;
-  border-color: #4ade80;
-  background: rgba(74, 222, 128, 0.1);
+  color: #fff;
+  background: var(--primary);
 }
 .mode-btn:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* Status pill πάνω στο viewfinder — σταθερή θέση (πάνω-κέντρο του frame,
+   όχι κολλημένη πάνω από το πλαίσιο-οδηγός) ώστε να διαβάζεται καθαρά όσο
+   ο χρήστης κρατάει το κινητό, ανεξάρτητα από το σχήμα/θέση του guide. */
+.plate-status-pill {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #fecaca;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(248, 113, 113, 0.5);
+  padding: 6px 14px;
+  border-radius: 999px;
+  white-space: nowrap;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.plate-status-pill.is-aligned {
+  color: #fff;
+  background: rgba(22, 163, 74, 0.92);
+  border-color: #16a34a;
+}
+.plate-status-pill.is-hint {
+  color: #1e1b0a;
+  background: rgba(251, 191, 36, 0.92);
+  border-color: #fbbf24;
 }
 
 /* Επιλογή τύπου επιχείρησης — εγγραφή */
@@ -449,21 +560,6 @@ textarea.input {
   color: var(--muted);
 }
 
-/* Επιφυλάξεις της ανάλυσης OCR */
-.ocr-warn {
-  margin-top: 8px;
-  padding: 8px 10px;
-  font-size: 0.82rem;
-  color: #fbbf24;
-  background: rgba(251, 191, 36, 0.1);
-  border: 1px solid rgba(251, 191, 36, 0.35);
-  border-radius: 8px;
-}
-.ocr-warn ul {
-  margin: 4px 0 0;
-  padding-left: 18px;
-}
-
 /* Πλαίσιο-οδηγός πλάκας (overlay).
    Κόκκινο = δεν εντοπίστηκε ακόμα καθαρή πινακίδα (π.χ. πολύ κοντά -> θόλωμα).
    Πράσινο (.is-aligned) = ζωντανό heuristic βρήκε 6-7 καθαρούς χαρακτήρες. */
@@ -481,40 +577,100 @@ textarea.input {
 .plate-guide.is-aligned {
   border-color: #4ade80;
 }
-.plate-guide-label {
-  position: absolute;
-  top: -22px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 0.72rem;
-  color: #f87171;
-  background: rgba(0, 0, 0, 0.5);
-  padding: 1px 8px;
-  border-radius: 6px;
-  white-space: nowrap;
-  transition: color 0.15s ease;
-}
-.plate-guide.is-aligned .plate-guide-label {
-  color: #4ade80;
-}
-.plate-guide-label-hint {
-  color: #fbbf24 !important;
-  font-weight: 700;
-}
 
-/* Preview προεπεξεργασμένης εικόνας */
-.ocr-preview {
+/* Οθόνη επιβεβαίωσης χαμηλής βεβαιότητας */
+.plate-verify {
+  margin-top: 8px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin-top: 10px;
+  gap: 10px;
 }
-.ocr-preview img {
-  max-width: 100%;
-  border: 1px solid var(--border);
+.plate-verify-editor {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.plate-char-input {
+  width: 40px;
+  height: 52px;
+  text-align: center;
+  font-size: 1.5rem;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-weight: 700;
+  text-transform: uppercase;
+  border: 2px solid var(--border);
   border-radius: 8px;
-  background: #fff;
+  background: var(--bg-elevated, #1a1a1a);
+  color: inherit;
 }
+
+/* Κύριο πεδίο πινακίδας σε "κουτάκια-ανά-χαρακτήρα" — εμφανίζεται όποτε η
+   τιμή ταιριάζει στη μορφή πινακίδας, πιο εύκολο να ελεγχθεί με μια ματιά
+   από ένα ενιαίο string. */
+.plate-field {
+  margin: 12px 0 4px;
+  padding: 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.plate-field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.plate-field-label {
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+}
+.plate-field-mode-btn {
+  background: none;
+  border: none;
+  color: var(--primary);
+  font-size: 0.78rem;
+  cursor: pointer;
+  padding: 4px 0;
+}
+.plate-field-mode-btn-inline {
+  margin-top: 6px;
+}
+.plate-char-input:focus {
+  border-color: var(--primary);
+  outline: none;
+}
+.plate-char-dash {
+  font-size: 1.4rem;
+  font-weight: 700;
+  opacity: 0.6;
+  padding: 0 2px;
+}
+/* Ενότητα ενοικίασης (σκοπός κίνησης / τόπος παραλαβής) — οπτικά ομαδοποιημένη
+   σε δικό της κουτί αντί για ξεχωριστά πεδία κολλημένα στο κύριο flow, ώστε
+   να ξεχωρίζει από τη ροή σάρωσης πινακίδας. Ανοιχτή by default (open) γιατί
+   ο σκοπός κίνησης είναι υποχρεωτικός για ενοικιάσεις. */
+.rental-section {
+  margin-top: 12px;
+  padding: 4px 12px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.rental-section-summary {
+  padding: 10px 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+.rental-section-summary::-webkit-details-marker {
+  display: none;
+}
+
 #qr-reader-region video {
   width: 100% !important;
   object-fit: cover;

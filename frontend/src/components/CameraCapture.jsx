@@ -10,11 +10,20 @@ import { useEffect, useRef, useState } from "react";
 import { getRecognizer, recognizerName } from "../services/plateRecognizer";
 import { logOcrAttempt, confirmOcrMetric, getCustomers } from "../services/api";
 import { VEHICLE_MOVEMENT_PURPOSES } from "../constants";
-import { normalizePlateInput, findClosestKnownPlate } from "../utils";
+import {
+  normalizePlateInput,
+  findClosestKnownPlate,
+  PLATE_LETTERS_LATIN,
+} from "../utils";
 // Ελαφρύ heuristic (χωρίς OCR) για ζωντανό feedback ευθυγράμμισης — δουλεύει
 // πάνω στο ίδιο pipeline denoising ανεξάρτητα από το ποιος recognizer είναι
 // ενεργός (Tesseract ή μελλοντικό ALPR), γι' αυτό εισάγεται απευθείας.
-import { assessPlateAlignment } from "../services/plateRecognizer/preprocess";
+import {
+  assessPlateAlignment,
+  MIN_SHARPNESS,
+  MIN_BRIGHTNESS,
+  MAX_BRIGHTNESS,
+} from "../services/plateRecognizer/preprocess";
 
 // Πόσο συχνά ελέγχουμε την ευθυγράμμιση ζωντανά (ms). Αρκετά γρήγορο ώστε να
 // νιώθει «ζωντανό», αρκετά αραιό ώστε να μην επιβαρύνει παλιότερα κινητά.
@@ -26,8 +35,13 @@ const ALIGN_CHECK_MS = 350;
 // σημαίνει ότι η πλάκα δεν είναι στην πραγματικότητα ευανάγνωστη — ένα
 // αυστηρό exact-match θα έμενε κόκκινο ακόμα και σε σωστή ευθυγράμμιση.
 const EXPECTED_CHARS = { car: 7, moto: 6 };
-function looksAligned(mode, ok, kept) {
-  return ok && kept >= EXPECTED_CHARS[mode] - 1;
+function looksAligned(mode, ok, kept, sharp) {
+  // sharp: ΕΠΙΠΛΕΟΝ πύλη πάνω στο ήδη υπάρχον blob-count heuristic — ένα
+  // κουνημένο/θολό frame μπορεί ΤΥΧΑΙΑ να βρει αρκετά blobs (π.χ. θόρυβος
+  // συμπτωματικά «μοιάζει» με χαρακτήρες) και να γίνει πράσινο ενώ στην
+  // πραγματικότητα δεν είναι αναγνώσιμο. Χωρίς αυτό, το auto-scan θα
+  // σκανάριζε (και θα απέτυχε ή θα διάβαζε λάθος) σε κάθε κούνημα χεριού.
+  return ok && kept >= EXPECTED_CHARS[mode] - 1 && sharp;
 }
 
 // Πόσο πλάτος του πλαισίου-οδηγού πρέπει να καλύπτουν οι χαρακτήρες
@@ -110,6 +124,125 @@ function drawCrop(video, rect) {
 // εξωτερικό ALPR σε σχέση με το στενό πλαίσιο-οδηγό του Tesseract.
 const ALPR_CROP_EXPAND = 1.6;
 
+// Multi-frame consensus (μόνο για Tesseract — δες σχόλιο στο captureAndRecognize
+// για γιατί το ALPR εξαιρείται): μία μεμονωμένη ανάγνωση μπορεί να πέσει πάνω
+// σε ένα τυχαία κακό frame (θόλωμα ανάμεσα σε δύο σταθερά καρέ, αντανάκλαση).
+// Παίρνοντας 2-3 ΞΕΧΩΡΙΣΤΑ frames και απαιτώντας συμφωνία, ένα μεμονωμένο λάθος
+// φιλτράρεται αντί να καταλήξει κατευθείαν στο πεδίο.
+const MAX_CONSENSUS_ATTEMPTS = 3;
+// Μικρή παύση ανάμεσα σε διαδοχικές λήψεις ώστε να είναι ΠΡΑΓΜΑΤΙΚΑ διαφορετικό
+// frame (όχι το ίδιο καρέ βίντεο ξανά) — αρκετό για φυσικό μικροκούνημα χεριού.
+const CONSENSUS_FRAME_DELAY_MS = 180;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Συνδυάζει πολλαπλές σαρώσεις (attempts) σε ΜΙΑ απόφαση:
+ *   - αν ≥2 συμφωνούν ΑΚΡΙΒΩΣ στην ίδια πινακίδα -> αυτή, με το υψηλότερο
+ *     confidence ανάμεσα στις συμφωνούσες
+ *   - αλλιώς, αν βρέθηκε έστω μία πινακίδα -> η πιο σίγουρη μεμονωμένη,
+ *     αλλά σημαδεμένη `disagreement: true` ώστε το UI να το δείξει ρητά
+ *   - αν καμία σάρωση δεν βρήκε πινακίδα -> null αποτέλεσμα
+ */
+function resolveConsensus(attempts) {
+  const found = attempts.filter((a) => a.plate);
+  const counts = new Map();
+  for (const a of found) counts.set(a.plate, (counts.get(a.plate) || 0) + 1);
+
+  let majorityPlate = null;
+  let majorityCount = 0;
+  for (const [p, count] of counts) {
+    if (count > majorityCount) {
+      majorityCount = count;
+      majorityPlate = p;
+    }
+  }
+
+  if (majorityPlate && majorityCount >= 2) {
+    const agreeing = found.filter((a) => a.plate === majorityPlate);
+    const best = agreeing.reduce((a, b) => ((b.confidence || 0) > (a.confidence || 0) ? b : a));
+    return {
+      ...best,
+      plate: majorityPlate,
+      agree: majorityCount,
+      total: attempts.length,
+      disagreement: false,
+    };
+  }
+
+  if (found.length) {
+    const best = found.reduce((a, b) => ((b.confidence || 0) > (a.confidence || 0) ? b : a));
+    return {
+      ...best,
+      agree: 1,
+      total: attempts.length,
+      // Πάνω από 1 ΔΙΑΦΟΡΕΤΙΚΗ πινακίδα βρέθηκε -> γνήσια ασυμφωνία, όχι απλά
+      // "δεν ξαναδοκιμάσαμε" (occurs when MAX_CONSENSUS_ATTEMPTS καλύφθηκε
+      // χωρίς καμία να επαναληφθεί).
+      disagreement: found.length > 1,
+    };
+  }
+
+  const last = attempts[attempts.length - 1] || {};
+  return { ...last, plate: null, agree: 0, total: attempts.length, disagreement: false };
+}
+
+// Μορφή πινακίδας που μπορεί να επεξεργαστεί ο χαρακτήρας-ανά-χαρακτήρα editor
+// παρακάτω — 3 γράμματα + 3 ή 4 ψηφία. Ό,τι δεν ταιριάζει (π.χ. ο χρήστης
+// έγραψε κάτι εντελώς χειροκίνητα) γυρνά στο απλό ελεύθερο πεδίο κειμένου.
+const VERIFIABLE_PLATE_RE = /^([A-Z]{3})-(\d{3,4})$/;
+
+/**
+ * Editor «ένα κουτί ανά χαρακτήρα» για τη φάση επιβεβαίωσης χαμηλής
+ * βεβαιότητας — μεγάλα, ξεχωριστά πλαίσια είναι πιο εύκολο να ελεγχθούν
+ * γρήγορα με μια ματιά απ' ό,τι ένα ενιαίο string, και ο περιορισμός ανά
+ * θέση (γράμμα πινακίδας / ψηφίο) αποτρέπει τυπογραφικά που θα παρήγαγαν
+ * μη-έγκυρη μορφή.
+ */
+function PlateVerifyEditor({ plate, onChange }) {
+  const match = VERIFIABLE_PLATE_RE.exec(plate || "");
+  if (!match) return null;
+  const [, letters, digits] = match;
+
+  function setChar(isLetters, index, raw) {
+    const ch = raw.slice(-1).toUpperCase();
+    if (isLetters) {
+      if (ch && !PLATE_LETTERS_LATIN.includes(ch)) return;
+      const next = letters.slice(0, index) + (ch || letters[index]) + letters.slice(index + 1);
+      onChange(`${next}-${digits}`);
+    } else {
+      if (ch && !/[0-9]/.test(ch)) return;
+      const next = digits.slice(0, index) + (ch || digits[index]) + digits.slice(index + 1);
+      onChange(`${letters}-${next}`);
+    }
+  }
+
+  return (
+    <div className="plate-verify-editor">
+      {letters.split("").map((c, i) => (
+        <input
+          key={`l${i}`}
+          className="plate-char-input"
+          value={c}
+          maxLength={1}
+          onChange={(e) => setChar(true, i, e.target.value)}
+        />
+      ))}
+      <span className="plate-char-dash">-</span>
+      {digits.split("").map((c, i) => (
+        <input
+          key={`d${i}`}
+          className="plate-char-input"
+          value={c}
+          maxLength={1}
+          inputMode="numeric"
+          onChange={(e) => setChar(false, i, e.target.value)}
+        />
+      ))}
+    </div>
+  );
+}
+
 export default function CameraCapture({ onConfirm, disabled, isRental }) {
   const videoRef = useRef(null);
   const frameRef = useRef(null);
@@ -132,6 +265,19 @@ export default function CameraCapture({ onConfirm, disabled, isRental }) {
   // fallback ALPR -> Tesseract) — βλ. services/plateRecognizer/index.js.
   const [engineUsed, setEngineUsed] = useState(null);
   const [engineFallback, setEngineFallback] = useState(false);
+  // Multi-frame consensus (μόνο Tesseract, δες captureAndRecognize): πόσες
+  // από τις σαρώσεις συμφώνησαν, και αν υπήρξε γνήσια ασυμφωνία.
+  const [consensusAgree, setConsensusAgree] = useState(null);
+  const [consensusTotal, setConsensusTotal] = useState(null);
+  const [disagreement, setDisagreement] = useState(false);
+  // Εικόνα ΑΚΡΙΒΩΣ όπως στάλθηκε για αναγνώριση — σε αντίθεση με το `preview`
+  // (μόνο Tesseract, ΜΕΤΑ την προεπεξεργασία), αυτή υπάρχει ΠΑΝΤΑ, ώστε η
+  // οθόνη επιβεβαίωσης να έχει πάντα εικόνα ελέγχου ανεξαρτήτως engine.
+  const [rawCropPreview, setRawCropPreview] = useState(null);
+  // Explicit επιβεβαίωση του χρήστη όταν η ανάγνωση ΔΕΝ είναι αρκετά σίγουρη
+  // (δες needsVerification) — το κουμπί δημιουργίας μένει κλειδωμένο μέχρι
+  // τότε, ώστε μια αβέβαιη ανάγνωση να μην περάσει σιωπηλά χωρίς έλεγχο.
+  const [verified, setVerified] = useState(false);
   const [preview, setPreview] = useState(null); // dataURL προεπεξεργασμένης εικόνας
   const [aligned, setAligned] = useState(false); // ζωντανό feedback πλαισίου
   const [flashSupported, setFlashSupported] = useState(false);
@@ -158,6 +304,11 @@ export default function CameraCapture({ onConfirm, disabled, isRental }) {
   // Πρόταση διόρθωσης βάσει γνωστής πινακίδας ("μήπως εννοείς...") — δες
   // findClosestKnownPlate στο utils.js.
   const [plateSuggestion, setPlateSuggestion] = useState(null);
+  // Όταν η πινακίδα ταιριάζει στη μορφή ΧΧΧ-999(9), το κύριο πεδίο δείχνεται
+  // ως κουτάκια-ανά-χαρακτήρα (πιο εύκολο να ελεγχθεί με μια ματιά). Ο
+  // χρήστης μπορεί να περάσει σε ελεύθερο πεδίο κειμένου όποτε θέλει (π.χ.
+  // μη τυπική πινακίδα) — αυτό το flag θυμάται ρητή επιλογή του χρήστη.
+  const [manualPlateEdit, setManualPlateEdit] = useState(false);
 
   useEffect(() => {
     return () => stopCamera();
@@ -194,20 +345,27 @@ export default function CameraCapture({ onConfirm, disabled, isRental }) {
         canvas.width = sw;
         canvas.height = sh;
         canvas.getContext("2d").drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
-        const { ok, kept, coverage, touchesEdge } = assessPlateAlignment(canvas);
-        const isAligned = looksAligned(mode, ok, kept);
+        const { ok, kept, coverage, touchesEdge, sharpness, brightness } =
+          assessPlateAlignment(canvas);
+        const tooDark = brightness < MIN_BRIGHTNESS;
+        const tooBright = brightness > MAX_BRIGHTNESS;
+        const isSharp = sharpness >= MIN_SHARPNESS;
+        const isAligned = looksAligned(mode, ok, kept, isSharp && !tooDark && !tooBright);
         if (cancelled) return;
 
         setAligned(isAligned);
-        // Hint κατεύθυνσης απόστασης — μόνο όταν έχουμε αξιόπιστο σήμα
-        // (κάποιοι χαρακτήρες εντοπίστηκαν) αλλά ΔΕΝ είναι ακόμα ευθυγραμμισμένη·
-        // αλλιώς μπορεί να είναι θέμα θαμπάδας/φωτισμού, όχι απόστασης.
-        // ΠΡΟΤΕΡΑΙΟΤΗΤΑ στο touchesEdge: αν κάποιος χαρακτήρας αγγίζει την
-        // άκρη του πλαισίου, η πινακίδα ήδη ξεφεύγει από το κάδρο — είναι
-        // ΠΟΛΥ κοντά, ό,τι κι αν λέει η coverage των ορατών χαρακτήρων
-        // (λίγοι, στριμωγμένοι χαρακτήρες μπορεί να δείχνουν ψευδώς «μακριά»).
+        // Hint — μόνο όταν έχουμε αξιόπιστο σήμα (κάποιοι χαρακτήρες
+        // εντοπίστηκαν) αλλά ΔΕΝ είναι ακόμα ευθυγραμμισμένη. Προτεραιότητα:
+        //   1) touchesEdge -> πολύ κοντά, ό,τι κι αν λέει η coverage
+        //   2) έκθεση (σκοτάδι/αντηλιά-φλας) -> αυτό ΕΞΗΓΕΙ γιατί δεν βρίσκει
+        //      καθαρούς χαρακτήρες, πιο χρήσιμο feedback από «κράτα σταθερά»
+        //   3) θόλωμα -> κράτα σταθερά / εστίασε
+        //   4) coverage -> απόσταση
         if (!isAligned && ok) {
           if (touchesEdge) setDistanceHint("back");
+          else if (tooDark) setDistanceHint("dark");
+          else if (tooBright) setDistanceHint("bright");
+          else if (!isSharp) setDistanceHint("blur");
           else if (coverage < MIN_COVERAGE) setDistanceHint("closer");
           else if (coverage > MAX_COVERAGE) setDistanceHint("back");
           else setDistanceHint(null);
@@ -336,13 +494,19 @@ export default function CameraCapture({ onConfirm, disabled, isRental }) {
     // Crop ΤΗΝ περιοχή του πλαισίου-οδηγού, μεταφρασμένη από τις συντεταγμένες
     // της οθόνης σε συντεταγμένες του καρέ της κάμερας. Στενό crop για το
     // Tesseract· ελαφρώς φαρδύτερο για το εξειδικευμένο ALPR (κάνει δικό του
-    // plate detection, βλ. computeCropRect).
-    const rect = computeCropRect(video, frame, mode);
-    if (!rect) return;
-    const wideRect = computeCropRect(video, frame, mode, ALPR_CROP_EXPAND);
+    // plate detection, βλ. computeCropRect). Καλείται ΞΑΝΑ σε κάθε consensus
+    // attempt ώστε να πιάνει ΠΡΑΓΜΑΤΙΚΑ διαφορετικό frame, όχι το ίδιο ξανά.
+    function captureFrames() {
+      const rect = computeCropRect(video, frame, mode);
+      if (!rect) return null;
+      const wideRect = computeCropRect(video, frame, mode, ALPR_CROP_EXPAND);
+      const crop = drawCrop(video, rect);
+      const wideCrop = wideRect ? drawCrop(video, wideRect) : crop;
+      return { crop, wideCrop };
+    }
 
-    const crop = drawCrop(video, rect);
-    const wideCrop = wideRect ? drawCrop(video, wideRect) : crop;
+    let frames = captureFrames();
+    if (!frames) return;
 
     setOcrRunning(true);
     setProgress(0);
@@ -350,22 +514,62 @@ export default function CameraCapture({ onConfirm, disabled, isRental }) {
     setRawText("");
     setWarnings([]);
     setEngineFallback(false);
+    setConsensusAgree(null);
+    setConsensusTotal(null);
+    setDisagreement(false);
     setPreview(null);
+    setRawCropPreview(null);
     setPlateSuggestion(null);
+    setVerified(false);
     try {
       const recognizer = getRecognizer();
-      const result = await recognizer.recognizePlate(
-        crop,
-        (pct) => setProgress(pct),
-        { mode, wideImageSource: wideCrop }
-      );
+      const attempts = [];
 
-      if (typeof result.confidence === "number") setConfidence(result.confidence);
-      setRawText(result.rawText || "");
-      setWarnings(result.warnings || []);
-      setEngineUsed(result.engineUsed || recognizerName);
-      setEngineFallback(!!result.engineFallback);
-      if (result.processedDataUrl) setPreview(result.processedDataUrl);
+      const firstResult = await recognizer.recognizePlate(
+        frames.crop,
+        (pct) => setProgress(Math.round(pct / MAX_CONSENSUS_ATTEMPTS)),
+        { mode, wideImageSource: frames.wideCrop }
+      );
+      attempts.push(firstResult);
+
+      // Multi-frame consensus ΜΟΝΟ όταν καταλήξαμε σε Tesseract (forced ή
+      // fallback από αποτυχημένο ALPR) — είναι το λιγότερο αξιόπιστο engine
+      // και επωφελείται πραγματικά από πολλαπλές ανεξάρτητες λήψεις. Το ALPR
+      // κάνει ήδη δικό του robust plate detection ανά κλήση ΚΑΙ κάθε κλήση
+      // κοστίζει δίκτυο/quota (~2500 δωρεάν/μήνα) — τριπλασιάζοντάς τες θα
+      // τριπλασίαζε αδίκως το κόστος για οριακό όφελος.
+      if (firstResult.engineUsed !== "plate_recognizer") {
+        for (let i = 1; i < MAX_CONSENSUS_ATTEMPTS; i++) {
+          const agreeing = attempts.filter(
+            (a) => a.plate && a.plate === attempts[attempts.length - 1].plate
+          );
+          if (attempts[attempts.length - 1].plate && agreeing.length >= 2) break;
+
+          await sleep(CONSENSUS_FRAME_DELAY_MS);
+          frames = captureFrames() || frames;
+          const result = await recognizer.recognizePlate(
+            frames.crop,
+            (pct) =>
+              setProgress(Math.round(((i + pct / 100) / MAX_CONSENSUS_ATTEMPTS) * 100)),
+            { mode, wideImageSource: frames.wideCrop }
+          );
+          attempts.push(result);
+        }
+      }
+      setProgress(100);
+
+      const consensus = resolveConsensus(attempts);
+
+      if (typeof consensus.confidence === "number") setConfidence(consensus.confidence);
+      setRawText(consensus.rawText || "");
+      setWarnings(consensus.warnings || []);
+      setEngineUsed(consensus.engineUsed || recognizerName);
+      setEngineFallback(attempts.some((a) => a.engineFallback));
+      setConsensusAgree(consensus.agree);
+      setConsensusTotal(consensus.total);
+      setDisagreement(!!consensus.disagreement);
+      if (consensus.processedDataUrl) setPreview(consensus.processedDataUrl);
+      setRawCropPreview(frames.crop.toDataURL("image/jpeg", 0.85));
 
       // Καταγραφή ΚΑΘΕ σάρωσης (fire-and-forget) — ποτέ δεν πρέπει να
       // μπλοκάρει ή να χαλάσει τη ροή αν το backend δεν απαντήσει. Η μηχανή
@@ -375,19 +579,20 @@ export default function CameraCapture({ onConfirm, disabled, isRental }) {
       lastMetricIdRef.current = null;
       logOcrAttempt({
         mode,
-        engine: result.engineUsed || recognizerName,
-        ocrPlate: result.plate || null,
-        confidence: typeof result.confidence === "number" ? result.confidence : null,
-        warningsCount: (result.warnings || []).length,
-        parserCorrected: !!result.corrected,
+        engine: consensus.engineUsed || recognizerName,
+        ocrPlate: consensus.plate || null,
+        confidence: typeof consensus.confidence === "number" ? consensus.confidence : null,
+        warningsCount: (consensus.warnings || []).length,
+        parserCorrected: !!consensus.corrected,
       })
         .then((m) => {
           lastMetricIdRef.current = m.id;
         })
         .catch(() => {});
 
-      if (result.plate) {
-        setPlate(result.plate);
+      if (consensus.plate) {
+        setPlate(consensus.plate);
+        setManualPlateEdit(false);
         // Κλείδωσε το auto-scan — βρέθηκε πινακίδα, μην την ξαναπειράξεις αν
         // η κάμερα μετακινηθεί αλλού. Ο χρήστης μπορεί πάντα να πατήσει
         // χειροκίνητα «Σκάναρε» για να ξαναδοκιμάσει.
@@ -397,7 +602,7 @@ export default function CameraCapture({ onConfirm, disabled, isRental }) {
         // πελάτη, είναι πολύ πιο πιθανό να είναι λάθος ανάγνωση παρά νέο
         // όχημα με σχεδόν ίδια πινακίδα — πρότεινε τη διόρθωση, μην την
         // επιβάλλεις (ο χρήστης αποφασίζει).
-        const match = findClosestKnownPlate(result.plate, knownPlatesRef.current);
+        const match = findClosestKnownPlate(consensus.plate, knownPlatesRef.current);
         setPlateSuggestion(match);
       } else {
         setPlate("");
@@ -420,17 +625,33 @@ export default function CameraCapture({ onConfirm, disabled, isRental }) {
   function acceptPlateSuggestion() {
     if (!plateSuggestion) return;
     setPlate(plateSuggestion.plate);
+    setManualPlateEdit(false);
     setPlateSuggestion(null);
+    // Η αποδοχή ΕΙΝΑΙ η επιβεβαίωση — ο χρήστης μόλις επέλεξε ρητά μια
+    // συγκεκριμένη, γνωστή πινακίδα αντί της αβέβαιης ανάγνωσης OCR.
+    setVerified(true);
   }
 
   function dismissPlateSuggestion() {
     setPlateSuggestion(null);
   }
 
+  /** Κάθε χειροκίνητη επεξεργασία (ελεύθερο πεδίο Ή verify-editor) ακυρώνει
+   * τυχόν προηγούμενη επιβεβαίωση — μια νέα τιμή χρειάζεται νέο έλεγχο. */
+  function handlePlateEdit(value) {
+    setPlate(normalizePlateInput(value));
+    setPlateSuggestion(null);
+    setVerified(false);
+  }
+
   function handleConfirm() {
     const value = normalizePlateInput(plate);
     if (!value) {
       setError("Συμπλήρωσε πινακίδα πριν τη δημιουργία εγγραφής.");
+      return;
+    }
+    if (needsVerification && !verified) {
+      setError("Επιβεβαίωσε ότι η πινακίδα είναι σωστή πριν συνεχίσεις.");
       return;
     }
     if (isRental && !movementPurpose) {
@@ -457,10 +678,19 @@ export default function CameraCapture({ onConfirm, disabled, isRental }) {
     onConfirm(value, extra);
   }
 
-  // 100% βεβαιότητα ΚΑΙ καμία επιφύλαξη parser -> σίγουρη ανάγνωση, όχι απλά
-  // "αρκετά καλή". Τότε αξίζει να καθοδηγήσουμε ρητά τον χρήστη στο επόμενο
-  // βήμα αντί να τον αφήσουμε να ψάχνει τι κάνει.
-  const isPerfect = confidence === 100 && warnings.length === 0 && !!plate;
+  // Η ανάγνωση χρειάζεται ΡΗΤΗ επιβεβαίωση πριν προχωρήσει η δημιουργία
+  // εγγραφής: είτε ο parser μάντεψε κάτι (warnings), είτε οι σαρώσεις
+  // διαφώνησαν μεταξύ τους, είτε το confidence είναι χαμηλό. Χωρίς σάρωση
+  // (χειροκίνητη πληκτρολόγηση από την αρχή) δεν ισχύει καμία από τις
+  // παραπάνω συνθήκες, οπότε δεν μπλοκάρει καθόλου.
+  const needsVerification =
+    !!plate && (disagreement || warnings.length > 0 || (confidence !== null && confidence < 70));
+
+  // 100% βεβαιότητα, καμία επιφύλαξη parser, ΚΑΙ καμία ασυμφωνία -> σίγουρη
+  // ανάγνωση, όχι απλά "αρκετά καλή". Τότε αξίζει να καθοδηγήσουμε ρητά τον
+  // χρήστη στο επόμενο βήμα αντί να τον αφήσουμε να ψάχνει τι κάνει.
+  const isPerfect =
+    confidence === 100 && warnings.length === 0 && !disagreement && !!plate;
 
   return (
     <div className="card">
@@ -499,27 +729,34 @@ export default function CameraCapture({ onConfirm, disabled, isRental }) {
           </button>
         )}
         {cameraOn && (
+          <span
+            className={`plate-status-pill${aligned ? " is-aligned" : ""}${
+              distanceHint ? " is-hint" : ""
+            }`}
+          >
+            {aligned
+              ? "✓ Έτοιμο"
+              : distanceHint === "closer"
+              ? "🔎 Λίγο πιο μπροστά"
+              : distanceHint === "back"
+              ? "↔️ Λίγο πιο πίσω"
+              : distanceHint === "blur"
+              ? "🫳 Κράτα σταθερά"
+              : distanceHint === "dark"
+              ? "🔦 Χρειάζεται φως"
+              : distanceHint === "bright"
+              ? "😎 Μείωσε αντηλιά/φλας"
+              : GUIDES[mode].label}
+          </span>
+        )}
+        {cameraOn && (
           <div
             className={`plate-guide${aligned ? " is-aligned" : ""}`}
             style={{
               width: `${GUIDES[mode].widthFrac * 100}%`,
               aspectRatio: `${GUIDES[mode].aspect}`,
             }}
-          >
-            <span
-              className={`plate-guide-label${
-                distanceHint ? " plate-guide-label-hint" : ""
-              }`}
-            >
-              {aligned
-                ? "✓ Έτοιμο"
-                : distanceHint === "closer"
-                ? "🔎 Λίγο πιο μπροστά"
-                : distanceHint === "back"
-                ? "↔️ Λίγο πιο πίσω"
-                : GUIDES[mode].label}
-            </span>
-          </div>
+          />
         )}
       </div>
 
@@ -574,22 +811,137 @@ export default function CameraCapture({ onConfirm, disabled, isRental }) {
         </div>
       )}
 
-      <label className="field-label">
-        Πινακίδα (μπορείς να τη διορθώσεις):
-        <input
-          className="input"
-          type="text"
-          value={plate}
-          placeholder="π.χ. OTM-776 ή ABH-1234"
-          onChange={(e) => {
-            setPlate(normalizePlateInput(e.target.value));
-            setPlateSuggestion(null);
+      {/* Ενιαία κάρτα αποτελέσματος σάρωσης — φωτογραφία + βεβαιότητα + μηχανή
+          + τυχόν επιφυλάξεις ΟΛΑ μαζί, ΜΙΑ φορά. Πριν, ο χρήστης έβλεπε την
+          ίδια φωτογραφία δύο φορές σε διαφορετικά σημεία της σελίδας (μία στο
+          verify block, μία ξανά πιο κάτω) — τώρα είναι ένα σημείο ελέγχου,
+          πριν καν διαβάσει το πεδίο πινακίδας. */}
+      {confidence !== null && (
+        <div
+          className="scan-result"
+          style={{
+            borderLeftColor:
+              confidence >= 80 ? "#4ade80" : confidence >= 50 ? "#d97706" : "#f87171",
           }}
-        />
-      </label>
+        >
+          <div className="scan-result-row">
+            {(preview || rawCropPreview) && (
+              <img
+                className="scan-result-thumb"
+                src={preview || rawCropPreview}
+                alt="Λήψη πινακίδας"
+              />
+            )}
+            <div className="scan-result-info">
+              <span
+                className="ocr-conf"
+                style={{
+                  color:
+                    confidence >= 80
+                      ? "#4ade80"
+                      : confidence >= 50
+                      ? "#d97706"
+                      : "#f87171",
+                }}
+              >
+                {confidence}% βεβαιότητα
+              </span>
+              <span className="ocr-status-engine">
+                {engineUsed === "plate_recognizer" ? "ALPR" : "tesseract"}
+                {consensusTotal > 1 &&
+                  (disagreement
+                    ? ` · ⚠️ διαφωνία (${consensusTotal} δοκιμές)`
+                    : ` · ✓ ${consensusAgree}/${consensusTotal} λήψεις`)}
+              </span>
+            </div>
+          </div>
+          {engineFallback && (
+            <div className="scan-result-note">
+              ⚠️ Το ALPR δεν ήταν διαθέσιμο — χρησιμοποιήθηκε το εναλλακτικό
+              tesseract (λιγότερο ακριβές).
+            </div>
+          )}
+          {warnings.length > 0 && (
+            <div className="scan-result-note">
+              ⚠️ Η πινακίδα δεν διαβάστηκε καθαρά: {warnings.join(" · ")}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Κύριο πεδίο πινακίδας: κουτάκια-ανά-χαρακτήρα όταν η τιμή ταιριάζει
+          στη μορφή ΧΧΧ-999 ή ΧΧΧ-9999 (πιο εύκολο να ελεγχθεί με μια ματιά),
+          αλλιώς απλό πεδίο κειμένου (π.χ. άδειο, ή μη τυπική πινακίδα). Το
+          μήκος των ψηφίων προσαρμόζεται μόνο του — 3 ή 4, ό,τι διαβάστηκε. */}
+      {!manualPlateEdit && VERIFIABLE_PLATE_RE.test(plate) ? (
+        <div className="plate-field">
+          <div className="plate-field-head">
+            <span className="plate-field-label">ΠΙΝΑΚΙΔΑ</span>
+            <button
+              type="button"
+              className="plate-field-mode-btn"
+              onClick={() => setManualPlateEdit(true)}
+            >
+              ✏️ Ελεύθερη επεξεργασία
+            </button>
+          </div>
+          <PlateVerifyEditor plate={plate} onChange={handlePlateEdit} />
+        </div>
+      ) : (
+        <label className="field-label">
+          Πινακίδα (μπορείς να τη διορθώσεις):
+          <input
+            className="input plate-input"
+            type="text"
+            value={plate}
+            placeholder="π.χ. OTM-776 ή ABH-1234"
+            onChange={(e) => handlePlateEdit(e.target.value)}
+          />
+          {VERIFIABLE_PLATE_RE.test(plate) && (
+            <button
+              type="button"
+              className="plate-field-mode-btn plate-field-mode-btn-inline"
+              onClick={() => setManualPlateEdit(false)}
+            >
+              🔢 Ανά χαρακτήρα
+            </button>
+          )}
+        </label>
+      )}
+
+      {/* Οθόνη επιβεβαίωσης — εμφανίζεται ΜΟΝΟ όταν η ανάγνωση δεν είναι
+          αρκετά σίγουρη (επιφυλάξεις parser, χαμηλό confidence, ή διαφωνία
+          ανάμεσα σε πολλαπλές σαρώσεις). Το κουμπί δημιουργίας μένει
+          κλειδωμένο μέχρι ο χρήστης να το επιβεβαιώσει ρητά — μια παθητική
+          προειδοποίηση συχνά προσπερνιέται όταν ο χρήστης βιάζεται. Τα
+          κουτάκια-ανά-χαρακτήρα είναι ήδη ορατά παραπάνω (κύριο πεδίο), και η
+          φωτογραφία ελέγχου είναι ήδη στην κάρτα αποτελέσματος από πάνω —
+          εδώ μένει μόνο το μήνυμα + το checkbox επιβεβαίωσης. */}
+      {needsVerification && (
+        <div className="plate-verify">
+          <div className="alert alert-error">
+            ⚠️{" "}
+            {disagreement
+              ? "Οι λήψεις διαφώνησαν μεταξύ τους"
+              : warnings.length > 0
+              ? "Η πινακίδα δεν διαβάστηκε καθαρά"
+              : "Χαμηλή βεβαιότητα OCR"}{" "}
+            — έλεγξε προσεκτικά κάθε χαρακτήρα πριν συνεχίσεις.
+          </div>
+          <label className="field-label field-checkbox">
+            <input
+              type="checkbox"
+              checked={verified}
+              onChange={(e) => setVerified(e.target.checked)}
+            />
+            ✅ Το επιβεβαιώνω — η πινακίδα παραπάνω είναι σωστή
+          </label>
+        </div>
+      )}
 
       {isRental && (
-        <>
+        <details className="rental-section" open>
+          <summary className="rental-section-summary">🚚 Στοιχεία ενοικίασης</summary>
           <label className="field-label">
             Σκοπός Κίνησης Οχήματος:
             <select
@@ -627,62 +979,7 @@ export default function CameraCapture({ onConfirm, disabled, isRental }) {
               />
             </label>
           )}
-        </>
-      )}
-
-      {/* Βεβαιότητα OCR */}
-      {confidence !== null && (
-        <div className="ocr-info">
-          <span
-            className="ocr-conf"
-            style={{
-              color:
-                confidence >= 80
-                  ? "#4ade80"
-                  : confidence >= 50
-                  ? "#d97706"
-                  : "#f87171",
-            }}
-          >
-            Βεβαιότητα OCR: {confidence}%
-            {confidence < 50 ? " — χαμηλή, έλεγξε/διόρθωσε" : ""}
-          </span>
-          {rawText && <span className="muted small">Διάβασε: «{rawText}»</span>}
-          <span className="muted small">
-            Μηχανή: {engineUsed === "plate_recognizer" ? "ALPR" : "tesseract"}
-          </span>
-        </div>
-      )}
-
-      {/* Fallback ΑΛΠΡ -> Tesseract: ο χρήστης πρέπει να ξέρει ότι χρησιμοποιήθηκε
-          η λιγότερο ακριβής μηχανή, ώστε να ελέγξει το αποτέλεσμα πιο προσεκτικά. */}
-      {engineFallback && (
-        <div className="alert alert-error">
-          ⚠️ Το ALPR δεν ήταν διαθέσιμο — χρησιμοποιήθηκε το εναλλακτικό
-          tesseract (λιγότερο ακριβές). Έλεγξε προσεκτικά την πινακίδα.
-        </div>
-      )}
-
-      {/* Επιφυλάξεις της ανάλυσης — τι μάντεψε ο parser και γιατί.
-          Χωρίς αυτό ο χρήστης βλέπει μια καθαρή πινακίδα και δεν έχει λόγο
-          να την ελέγξει, ενώ στην πραγματικότητα είναι εικασία. */}
-      {warnings.length > 0 && (
-        <div className="ocr-warn">
-          ⚠️ Η πινακίδα ΔΕΝ διαβάστηκε καθαρά — έλεγξέ την:
-          <ul>
-            {warnings.map((w) => (
-              <li key={w}>{w}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {/* Preview: τι «είδε» το OCR μετά την προεπεξεργασία */}
-      {preview && (
-        <div className="ocr-preview">
-          <span className="muted small">Προεπεξεργασμένη εικόνα (OCR input):</span>
-          <img src={preview} alt="OCR preview" />
-        </div>
+        </details>
       )}
 
       {error && <div className="alert alert-error">{error}</div>}
@@ -697,15 +994,19 @@ export default function CameraCapture({ onConfirm, disabled, isRental }) {
         </div>
       )}
 
-      <button
-        className={`btn btn-block${isPerfect ? " btn-success" : " btn-primary"}`}
-        onClick={handleConfirm}
-        disabled={disabled || ocrRunning}
-      >
-        {isPerfect
-          ? "✓ Δημιουργία εγγραφής"
-          : "➕ Δημιουργία εγγραφής (SendClient)"}
-      </button>
+      <div className="sticky-cta">
+        <button
+          className={`btn btn-block${isPerfect ? " btn-success" : " btn-primary"}`}
+          onClick={handleConfirm}
+          disabled={disabled || ocrRunning || (needsVerification && !verified)}
+        >
+          {needsVerification && !verified
+            ? "🔒 Επιβεβαίωσε την πινακίδα παραπάνω"
+            : isPerfect
+            ? "✓ Δημιουργία εγγραφής"
+            : "➕ Δημιουργία εγγραφής (SendClient)"}
+        </button>
+      </div>
     </div>
   );
 }
