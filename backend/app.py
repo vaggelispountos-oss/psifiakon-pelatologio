@@ -1932,6 +1932,14 @@ def register_routes(app):
                 existing_ids.add(id_dcl)
                 imported += 1
 
+            # Commit ΑΝΑ ΣΕΛΙΔΑ, όχι μία φορά στο τέλος: με έως 200 σελίδες ×
+            # κλήση ΑΑΔΕ, το request υπερβαίνει εύκολα το gunicorn timeout ή
+            # χάνει το δίκτυο στη μέση. Με ένα τελικό commit, ΟΛΗ η δουλειά
+            # (π.χ. 150 σελίδες) χανόταν και ο χρήστης ξεκινούσε από την
+            # αρχή — για να ξαναποτύχει στο ίδιο σημείο. Ό,τι έχει ήδη
+            # εισαχθεί παραμένει, και το existing_ids το κρατά idempotent.
+            db.session.commit()
+
             pages += 1
             continuation = res.get("continuationToken")
             if not continuation:
