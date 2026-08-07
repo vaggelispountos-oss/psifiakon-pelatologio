@@ -1960,15 +1960,15 @@ if __name__ == "__main__":
     # Ο gunicorn (production, δες render.yaml) ΔΕΝ περνά ποτέ από εδώ —
     # φορτώνει κατευθείαν το `app` module-level object, με πολλαπλούς
     # workers που θα έτρεχαν το ΙΔΙΟ migration ταυτόχρονα αν ήταν εδώ.
-    # Στο production, το `alembic upgrade head` τρέχει ΜΙΑ φορά ως
-    # preDeployCommand, πριν ξεκινήσουν οι workers.
-    from alembic import command
-    from alembic.config import Config as AlembicConfig
+    # Στο production, το ίδιο τρέχει ΜΙΑ φορά μέσα στο buildCommand (δες
+    # render.yaml), πριν ξεκινήσουν οι workers.
+    #
+    # scripts.migrate.upgrade_to_head() αντί για σκέτο alembic upgrade
+    # head — self-healing αν η βάση είναι σε "legacy" κατάσταση (δες το
+    # module docstring στο scripts/migrate.py για το γιατί).
+    from scripts.migrate import upgrade_to_head
 
-    from config import BASE_DIR
-
-    _alembic_ini = os.path.join(BASE_DIR, "alembic.ini")
-    command.upgrade(AlembicConfig(_alembic_ini), "head")
+    upgrade_to_head()
 
     # Default 5001 — το 5000 το κρατάει συχνά το AirPlay Receiver στο macOS.
     port = int(os.getenv("PORT", "5001"))

@@ -117,15 +117,24 @@ backend/
 processes που τρέχουν το ίδιο `ALTER TABLE` ταυτόχρονα στο boot σκάνε με
 `DuplicateColumn` σε Postgres).
 
+Η εφαρμογή του γίνεται πάντα μέσω **`scripts/migrate.py`** (όχι σκέτο
+`alembic upgrade head`) — αυτόματα εντοπίζει αν η βάση είναι σε "legacy"
+κατάσταση (πίνακες ήδη υπάρχουν, π.χ. από παλιότερο `db.create_all()`,
+αλλά δεν υπάρχει ακόμη `alembic_version`) και κάνει stamp στο baseline
+**πριν** το upgrade — αλλιώς ισοδυναμεί με σκέτο `upgrade head`. Self-
+healing: δεν χρειάζεται ΠΟΤΕ χειροκίνητο toggle stamp/upgrade (δες το
+docstring στο ίδιο το αρχείο για το πλήρες ιστορικό — μπερδευτήκαμε μία
+φορά με το χειροκίνητο toggle πριν φτιαχτεί αυτό).
+
 **Τοπικά (`python app.py`)**: τα migrations εφαρμόζονται **αυτόματα** πριν
 ξεκινήσει ο server — δεν χρειάζεται χειροκίνητο βήμα. Αν προτιμάς να το
 κάνεις ρητά (π.χ. χωρίς να ανοίξεις τον server):
 ```bash
-alembic upgrade head
+python scripts/migrate.py
 ```
 
-**Production (Render)**: το `render.yaml` τρέχει `alembic upgrade head` ως
-μέρος του `buildCommand` — **μία φορά ανά deploy**, πριν ξεκινήσουν οι
+**Production (Render)**: το `render.yaml` τρέχει `python scripts/migrate.py`
+ως μέρος του `buildCommand` — **μία φορά ανά deploy**, πριν ξεκινήσουν οι
 gunicorn workers.
 
 **Προσθήκη νέου πεδίου/πίνακα**: μετά από αλλαγή σε `models.py`,

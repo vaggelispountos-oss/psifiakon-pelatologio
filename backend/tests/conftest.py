@@ -29,11 +29,9 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from alembic import command  # noqa: E402
-from alembic.config import Config as AlembicConfig  # noqa: E402
+from scripts.migrate import upgrade_to_head  # noqa: E402
 
-_BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-command.upgrade(AlembicConfig(os.path.join(_BACKEND_DIR, "alembic.ini")), "head")
+upgrade_to_head()
 
 from app import app as flask_app  # noqa: E402
 from auth import limiter  # noqa: E402
