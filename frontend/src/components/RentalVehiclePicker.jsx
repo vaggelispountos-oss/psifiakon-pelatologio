@@ -14,25 +14,11 @@ import { VEHICLE_CATEGORIES, VEHICLE_MOVEMENT_PURPOSES } from "../constants";
 // Καταστάσεις που σημαίνουν "το όχημα είναι έξω, δεν έχει επιστραφεί ακόμα".
 const ACTIVE_RENTAL_STATUSES = new Set(["open", "in_progress"]);
 
-// Ομαδοποιεί μια λίστα οχημάτων ανά κατηγορία, με τη σειρά του
-// VEHICLE_CATEGORIES — επιστρέφει μόνο τις κατηγορίες που έχουν όχημα.
-function groupByCategory(vehicles) {
-  const groups = new Map();
-  for (const v of vehicles) {
-    const key = v.category || "car";
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(v);
-  }
-  return VEHICLE_CATEGORIES.filter((c) => groups.has(c.value)).map((c) => ({
-    ...c,
-    vehicles: groups.get(c.value),
-  }));
-}
-
 export default function RentalVehiclePicker({ onConfirm, disabled, entries }) {
   const [vehicles, setVehicles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [activeCategory, setActiveCategory] = useState(null);
 
   const [plate, setPlate] = useState("");
   const [movementPurpose, setMovementPurpose] = useState("");
@@ -73,13 +59,31 @@ export default function RentalVehiclePicker({ onConfirm, disabled, entries }) {
     [vehicles, busyPlates]
   );
 
-  const availableGroups = useMemo(
-    () => groupByCategory(availableVehicles),
-    [availableVehicles]
+  // Ποιες κατηγορίες έχουν έστω ένα όχημα στον στόλο -> αυτές εμφανίζονται
+  // ως κουτάκια επιλογής. Επιλέγεται μία τη φορά, ώστε η λίστα από κάτω να
+  // μη γίνεται μακρόστενο χάος με όλα τα οχήματα μαζί.
+  const categoriesPresent = useMemo(
+    () =>
+      VEHICLE_CATEGORIES.filter((c) =>
+        vehicles.some((v) => (v.category || "car") === c.value)
+      ),
+    [vehicles]
   );
-  const unavailableGroups = useMemo(
-    () => groupByCategory(unavailableVehicles),
-    [unavailableVehicles]
+
+  // Προεπιλογή: η πρώτη κατηγορία που έχει όχημα (μόλις φορτώσει ο στόλος).
+  useEffect(() => {
+    if (activeCategory === null && categoriesPresent.length > 0) {
+      setActiveCategory(categoriesPresent[0].value);
+    }
+  }, [activeCategory, categoriesPresent]);
+
+  const availableInCategory = useMemo(
+    () => availableVehicles.filter((v) => (v.category || "car") === activeCategory),
+    [availableVehicles, activeCategory]
+  );
+  const unavailableInCategory = useMemo(
+    () => unavailableVehicles.filter((v) => (v.category || "car") === activeCategory),
+    [unavailableVehicles, activeCategory]
   );
 
   // Πινακίδες που είναι σε ανοιχτή ενοικίαση ΚΑΙ έχει περάσει η αναμενόμενη
@@ -143,60 +147,66 @@ export default function RentalVehiclePicker({ onConfirm, disabled, entries }) {
 
       {!loading && vehicles.length > 0 && (
         <>
-          {availableVehicles.length === 0 && (
+          <div className="vehicle-category-tabs">
+            {categoriesPresent.map((c) => (
+              <button
+                key={c.value}
+                type="button"
+                className={`vehicle-category-tab ${activeCategory === c.value ? "vehicle-category-tab-active" : ""}`}
+                onClick={() => {
+                  setActiveCategory(c.value);
+                  setPlate("");
+                  setError("");
+                }}
+                disabled={disabled}
+              >
+                <span className="vehicle-category-tab-icon">{c.icon}</span>
+                <span>{c.label}</span>
+              </button>
+            ))}
+          </div>
+
+          {availableInCategory.length === 0 && (
             <div className="alert alert-warn">
-              ⏰ Όλα τα οχήματα του στόλου είναι αυτή τη στιγμή σε ενοικίαση.
+              ⏰ Όλα τα οχήματα αυτής της κατηγορίας είναι αυτή τη στιγμή σε
+              ενοικίαση.
             </div>
           )}
 
-          {availableGroups.map((group) => (
-            <div key={group.value} style={{ marginTop: 12 }}>
-              <p className="muted small vehicle-category-heading">
-                {group.icon} {group.label}
-              </p>
-              <div className="vehicle-picker-list">
-                {group.vehicles.map((v) => (
-                  <button
-                    key={v.id}
-                    type="button"
-                    className={`vehicle-pick-btn vehicle-pick-btn-available ${plate === v.plate ? "vehicle-pick-btn-active" : ""}`}
-                    onClick={() => handleSelect(v)}
-                    disabled={disabled}
-                  >
-                    <span className="mono">{v.plate}</span>
-                    {v.label && <span className="small">{v.label}</span>}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ))}
+          <div className="vehicle-picker-list">
+            {availableInCategory.map((v) => (
+              <button
+                key={v.id}
+                type="button"
+                className={`vehicle-pick-btn vehicle-pick-btn-available ${plate === v.plate ? "vehicle-pick-btn-active" : ""}`}
+                onClick={() => handleSelect(v)}
+                disabled={disabled}
+              >
+                <span className="mono">{v.plate}</span>
+                {v.label && <span className="small">{v.label}</span>}
+              </button>
+            ))}
+          </div>
 
-          {unavailableGroups.length > 0 && (
+          {unavailableInCategory.length > 0 && (
             <>
               <p className="muted small" style={{ marginTop: 20 }}>
                 Σε ενοικίαση τώρα (μη διαθέσιμα):
               </p>
-              {unavailableGroups.map((group) => (
-                <div key={group.value} style={{ marginTop: 8 }}>
-                  <p className="muted small vehicle-category-heading">
-                    {group.icon} {group.label}
-                  </p>
-                  <div className="vehicle-picker-list">
-                    {group.vehicles.map((v) => {
-                      const overdue = overduePlates.has(v.plate);
-                      return (
-                        <div
-                          key={v.id}
-                          className={`vehicle-pick-btn vehicle-pick-btn-disabled ${overdue ? "vehicle-pick-btn-overdue" : "vehicle-pick-btn-rented"}`}
-                        >
-                          <span className="mono">{v.plate}</span>
-                          {v.label && <span className="small">{v.label}</span>}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
+              <div className="vehicle-picker-list">
+                {unavailableInCategory.map((v) => {
+                  const overdue = overduePlates.has(v.plate);
+                  return (
+                    <div
+                      key={v.id}
+                      className={`vehicle-pick-btn vehicle-pick-btn-disabled ${overdue ? "vehicle-pick-btn-overdue" : "vehicle-pick-btn-rented"}`}
+                    >
+                      <span className="mono">{v.plate}</span>
+                      {v.label && <span className="small">{v.label}</span>}
+                    </div>
+                  );
+                })}
+              </div>
             </>
           )}
 

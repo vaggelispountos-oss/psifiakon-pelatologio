@@ -743,6 +743,32 @@ textarea.input {
   text-transform: uppercase;
   letter-spacing: 0.02em;
 }
+.vehicle-category-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 16px;
+}
+.vehicle-category-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: 10px;
+  cursor: pointer;
+  color: var(--text);
+  font-size: 14px;
+}
+.vehicle-category-tab-icon {
+  font-size: 16px;
+}
+.vehicle-category-tab-active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
 .vehicle-picker-list {
   display: flex;
   flex-wrap: wrap;
