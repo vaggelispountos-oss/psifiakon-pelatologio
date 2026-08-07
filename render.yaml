@@ -68,6 +68,19 @@ services:
       # κωδικού μέσα στο email (π.χ. https://app.mygarage.gr).
       - key: FRONTEND_URL
         sync: false
+      # Shared storage του Flask-Limiter (δες backend/auth.py) — χωρίς αυτό,
+      # με --workers 2 κάθε process κρατά ΔΙΚΟ ΤΟΥ μετρητή rate-limit.
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: dcl-redis
+          property: connectionString
+
+  - type: redis
+    name: dcl-redis
+    plan: free
+    ipAllowList: []
+    maxmemoryPolicy: allkeys-lru
 
 databases:
   - name: dcl-db

@@ -136,6 +136,12 @@ class Config:
     # μόνο αν ξέρεις τι ψάχνεις και πότε συνέβη.
     SENTRY_DSN = os.getenv("SENTRY_DSN", "").strip()
 
+    # --- Rate limiting (Flask-Limiter storage backend) ---
+    # Κενό (default) = in-memory (ΑΝΑ gunicorn worker/process — δες auth.py
+    # για γιατί αυτό είναι πρόβλημα με >1 worker). Όρισε REDIS_URL σε
+    # production για shared storage (π.χ. redis://user:pass@host:port).
+    REDIS_URL = os.getenv("REDIS_URL", "").strip()
+
     # --- Telemetry OCR (προαιρετικό) ---
     # Αν TELEMETRY_URL οριστεί, ΚΑΘΕ μετρική OCR (κάθε σάρωση πινακίδας)
     # προωθείται ΚΑΙ σε αυτό το URL — τυπικά τον δικό σου κεντρικό server

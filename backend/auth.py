@@ -34,16 +34,22 @@ from flask_jwt_extended import (
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
+from config import Config
 from email_service import send_email
 from models import PasswordResetToken, Settings, Workshop, db, utcnow
 
 jwt = JWTManager()
 
-# Brute-force protection στο login/register/forgot-password. In-memory
-# storage — αρκεί για ένα μόνο Render instance (δεν χρειάζεται Redis για
-# λίγους πρώτους πελάτες)· αν στο μέλλον τρέξουν πολλά instances, θα
-# χρειαστεί shared storage (π.χ. Redis) ώστε τα όρια να μετράνε σωστά.
-limiter = Limiter(key_func=get_remote_address, default_limits=[])
+# Brute-force protection στο login/register/forgot-password. Χωρίς
+# REDIS_URL, in-memory storage — ΑΝΑ gunicorn worker/process (render.yaml:
+# --workers 2), οπότε ένα "10 per minute" γίνεται στην πράξη ~20, ΚΑΙ
+# μηδενίζεται σε κάθε deploy. Με REDIS_URL (δες config.py), shared storage
+# ανάμεσα σε workers/deploys — τα όρια μετράνε πραγματικά αυτό που λένε.
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=[],
+    storage_uri=Config.REDIS_URL or "memory://",
+)
 
 
 def workshop_key():
