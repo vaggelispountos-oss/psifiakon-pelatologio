@@ -20,8 +20,13 @@
 //         processedDataUrl?: string, candidates?: Array
 //     }>
 // --------------------------------------------------------------------
-import * as tesseractRecognizer from "./tesseractRecognizer";
 import * as plateRecognizerApiRecognizer from "./plateRecognizerApiRecognizer";
+
+// Dynamic import (όχι static): το tesseract.js είναι το μεγαλύτερο μέρος του
+// bundle (~400kB) αλλά χρειάζεται ΜΟΝΟ όταν πράγματι τρέξει tesseract engine
+// (pref="tesseract" ή fallback μετά από αποτυχία ALPR) — χωρίς αυτό,
+// κατέβαινε σε ΚΑΘΕ άνοιγμα της εφαρμογής ακόμα κι αν δεν σκανάρεις ποτέ.
+const loadTesseractRecognizer = () => import("./tesseractRecognizer");
 
 const STORAGE_KEY = "ocrEngine";
 
@@ -63,6 +68,7 @@ export function getRecognizer() {
   if (pref === "tesseract") {
     return {
       async recognizePlate(imageSource, onProgress, opts) {
+        const tesseractRecognizer = await loadTesseractRecognizer();
         const result = await tesseractRecognizer.recognizePlate(
           imageSource,
           onProgress,
@@ -86,6 +92,7 @@ export function getRecognizer() {
         // Fallback ΣΙΩΠΗΛΟ ως προς τη ροή (ο χρήστης δεν χρειάζεται να κάνει
         // τίποτα) αλλά ΟΧΙ κρυφό — το engineFallback φτάνει στο UI ώστε να
         // φαίνεται ότι χρησιμοποιήθηκε το λιγότερο ακριβές engine.
+        const tesseractRecognizer = await loadTesseractRecognizer();
         const result = await tesseractRecognizer.recognizePlate(
           imageSource,
           onProgress,
