@@ -23,7 +23,7 @@ from flask import Flask, current_app, g, jsonify, request
 from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from auth import init_auth, require_auth
+from auth import init_auth, limiter, require_auth, workshop_key
 from config import Config, validate_production_config
 from models import (
     AadeLog,
@@ -1271,6 +1271,7 @@ def register_routes(app):
     # ----------------------------------------------------------------
     @app.route("/api/ocr/plate", methods=["POST"])
     @require_auth
+    @limiter.limit("30 per minute", key_func=workshop_key)
     def ocr_plate():
         token = current_app.config["PLATE_RECOGNIZER_TOKEN"]
         if not token:
@@ -1284,6 +1285,11 @@ def register_routes(app):
         upload = request.files.get("upload")
         if not upload:
             raise ApiError("Λείπει το αρχείο εικόνας (πεδίο «upload»).")
+        if upload.mimetype not in ("image/jpeg", "image/png", "image/webp"):
+            raise ApiError(
+                "Μη έγκυρος τύπος αρχείου — επιτρέπονται μόνο JPEG, PNG ή WebP εικόνες.",
+                400,
+            )
 
         try:
             resp = requests.post(

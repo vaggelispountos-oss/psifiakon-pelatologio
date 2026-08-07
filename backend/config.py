@@ -115,6 +115,11 @@ class Config:
     # Περιορισμός σε ελληνικές πινακίδες — ανεβάζει αισθητά την ακρίβεια.
     PLATE_RECOGNIZER_REGIONS = os.getenv("PLATE_RECOGNIZER_REGIONS", "gr")
 
+    # Μέγιστο μέγεθος request body (bytes) — προστασία από τεράστια uploads
+    # (π.χ. στο /api/ocr/plate). Default 8MB. Το Flask επιστρέφει 413
+    # αυτόματα αν ξεπεραστεί.
+    MAX_CONTENT_LENGTH = int(os.getenv("MAX_CONTENT_LENGTH", str(8 * 1024 * 1024)))
+
     # --- Κρυπτογράφηση ευαίσθητων στηλών στη βάση (aade_subscription_key) ---
     # Fernet key (32 bytes urlsafe-base64), π.χ. `python -c "from
     # cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.

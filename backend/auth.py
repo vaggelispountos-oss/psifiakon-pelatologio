@@ -44,6 +44,15 @@ jwt = JWTManager()
 # χρειαστεί shared storage (π.χ. Redis) ώστε τα όρια να μετράνε σωστά.
 limiter = Limiter(key_func=get_remote_address, default_limits=[])
 
+
+def workshop_key():
+    """Rate-limit key ανά workshop (όχι ανά IP) — π.χ. για /api/ocr/plate,
+    όπου ένα ολόκληρο συνεργείο πίσω από NAT μοιράζεται μία δημόσια IP.
+    Χρησιμοποιείται ΜΟΝΟ πίσω από @require_auth, που θέτει g.workshop_id
+    πριν τρέξει το limiter.limit (η σειρά των decorators το εξασφαλίζει)."""
+    workshop_id = getattr(g, "workshop_id", None)
+    return f"workshop:{workshop_id}" if workshop_id is not None else get_remote_address()
+
 auth_bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 admin_bp = Blueprint("admin", __name__, url_prefix="/api/admin")
 
