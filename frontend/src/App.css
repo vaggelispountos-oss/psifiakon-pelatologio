@@ -33,7 +33,12 @@ body {
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
-  overflow-x: hidden;
+  /* ΟΧΙ overflow-x: hidden εδώ (μόνο στο .app) — αν οριστεί μόνο ο ένας
+     άξονας, το CSS spec υπολογίζει τον άλλο σε 'auto', κάνοντας το <body>
+     ΔΙΚΟ ΤΟΥ scroll container. Αυτό σπάει το containing block του
+     position:sticky μέσα στην εφαρμογή (.sticky-cta «κολλούσε» πάνω από
+     προηγούμενο περιεχόμενο σε κοντές οθόνες αντί να μένει στη φυσική του
+     θέση). Το .app ήδη κόβει το οριζόντιο overflow, οπότε αυτό εδώ περίσσευε. */
 }
 
 .app {
@@ -346,10 +351,12 @@ textarea.input {
    ειδικά αφού το viewfinder + τα status blocks μπορούν να γεμίσουν την
    οθόνη σε μικρά κινητά. Το gradient πάνω από το κουμπί αποτρέπει το
    περιεχόμενο να "κόβεται" απότομα κάτω από αυτό καθώς κάνει scroll. */
+/* ΟΧΙ position:sticky εδώ πλέον — σε κοντό περιεχόμενο (π.χ. η οθόνη
+   χειροκίνητης καταχώρησης πινακίδας) το sticky «κολλούσε» στην
+   υπολογισμένη θέση ΑΝΕΞΑΡΤΗΤΑ από το αν υπήρχε καν κύλιση, καλύπτοντας
+   πεδία από πάνω του. Με το μόνιμο κάτω μενού tabs το CTA είναι ούτως ή
+   άλλως πάντα κοντά — αρκεί απλή θέση στη ροή του εγγράφου. */
 .sticky-cta {
-  position: sticky;
-  bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px));
-  z-index: 5;
   margin: 14px -16px -16px;
   padding: 18px 16px 14px;
   background: linear-gradient(

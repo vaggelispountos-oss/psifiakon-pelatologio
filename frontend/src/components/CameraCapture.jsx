@@ -309,6 +309,10 @@ export default function CameraCapture({ onConfirm, disabled, isRental }) {
   // χρήστης μπορεί να περάσει σε ελεύθερο πεδίο κειμένου όποτε θέλει (π.χ.
   // μη τυπική πινακίδα) — αυτό το flag θυμάται ρητή επιλογή του χρήστη.
   const [manualPlateEdit, setManualPlateEdit] = useState(false);
+  // Οθόνη «σάρωση» (κάμερα) vs «έλεγχος» (πεδίο + επιβεβαίωση + CTA) — ΡΗΤΟ
+  // state αντί για παράγωγο από `!!plate`, ώστε το να αδειάσει κανείς το
+  // πεδίο πινακίδας στην οθόνη ελέγχου να ΜΗΝ πετάξει πίσω στην κάμερα.
+  const [reviewMode, setReviewMode] = useState(false);
 
   useEffect(() => {
     return () => stopCamera();
@@ -595,8 +599,13 @@ export default function CameraCapture({ onConfirm, disabled, isRental }) {
         setManualPlateEdit(false);
         // Κλείδωσε το auto-scan — βρέθηκε πινακίδα, μην την ξαναπειράξεις αν
         // η κάμερα μετακινηθεί αλλού. Ο χρήστης μπορεί πάντα να πατήσει
-        // χειροκίνητα «Σκάναρε» για να ξαναδοκιμάσει.
+        // «↺ Νέα σάρωση» για να ξαναδοκιμάσει.
         scanLockedRef.current = true;
+        // Βρέθηκε πινακίδα -> περνάμε στην οθόνη ελέγχου. Η κάμερα δεν
+        // χρειάζεται πια να τρέχει ζωντανά (μπαταρία, λυχνία κάμερας) — το
+        // «↺ Νέα σάρωση» την ξανανοίγει όποτε χρειαστεί.
+        stopCamera();
+        setReviewMode(true);
 
         // «Μήπως εννοείς...»: αν η ανάγνωση διαφέρει 1 χαρακτήρα από γνωστό
         // πελάτη, είναι πολύ πιο πιθανό να είναι λάθος ανάγνωση παρά νέο
@@ -678,6 +687,36 @@ export default function CameraCapture({ onConfirm, disabled, isRental }) {
     onConfirm(value, extra);
   }
 
+  // Καθαρίζει ΟΛΟ το αποτέλεσμα της προηγούμενης σάρωσης και ξανανοίγει την
+  // κάμερα — επιστροφή στην οθόνη σάρωσης από την οθόνη ελέγχου.
+  function handleRetry() {
+    setPlate("");
+    setError("");
+    setConfidence(null);
+    setRawText("");
+    setWarnings([]);
+    setEngineFallback(false);
+    setConsensusAgree(null);
+    setConsensusTotal(null);
+    setDisagreement(false);
+    setPreview(null);
+    setRawCropPreview(null);
+    setPlateSuggestion(null);
+    setVerified(false);
+    setReviewMode(false);
+    scanLockedRef.current = false;
+    stableAlignedTicksRef.current = 0;
+    startCamera();
+  }
+
+  // «Πληκτρολόγησε χειροκίνητα» από την οθόνη σάρωσης — η κάμερα ΔΕΝ
+  // χρειάζεται πια να τρέχει, ο χρήστης πάει κατευθείαν στο πεδίο πινακίδας.
+  function handleManualEntry() {
+    stopCamera();
+    setError("");
+    setReviewMode(true);
+  }
+
   // Η ανάγνωση χρειάζεται ΡΗΤΗ επιβεβαίωση πριν προχωρήσει η δημιουργία
   // εγγραφής: είτε ο parser μάντεψε κάτι (warnings), είτε οι σαρώσεις
   // διαφώνησαν μεταξύ τους, είτε το confidence είναι χαμηλό. Χωρίς σάρωση
@@ -695,318 +734,344 @@ export default function CameraCapture({ onConfirm, disabled, isRental }) {
   return (
     <div className="card">
       <h2>{isRental ? "Παραλαβή οχήματος" : "Είσοδος οχήματος"}</h2>
-      <p className="muted">
-        Διάλεξε τύπο οχήματος και ευθυγράμμισε την πλάκα μέσα στο πλαίσιο· θα
-        γίνει ΠΡΑΣΙΝΟ όταν φαίνεται καθαρά και σκανάρει μόνη της. Ακολούθησε
-        τις οδηγίες απόστασης αν εμφανιστούν, ή πάτα «Σκάναρε» χειροκίνητα
-        όποτε θες.
-      </p>
 
-      <div className="mode-toggle">
-        {Object.keys(GUIDES).map((key) => (
-          <button
-            key={key}
-            type="button"
-            className={`mode-btn${mode === key ? " is-active" : ""}`}
-            onClick={() => setMode(key)}
-            disabled={ocrRunning}
-          >
-            {key === "car" ? "🚗 Αυτοκίνητο" : "🏍️ Μηχανή"}
-          </button>
-        ))}
-      </div>
+      {!reviewMode ? (
+        <>
+          <p className="muted">
+            Διάλεξε τύπο οχήματος και ευθυγράμμισε την πλάκα μέσα στο
+            πλαίσιο· θα γίνει ΠΡΑΣΙΝΟ όταν φαίνεται καθαρά και σκανάρει μόνη
+            της, ή πάτα «Σκάναρε» χειροκίνητα όποτε θες.
+          </p>
 
-      <div className="camera-frame" ref={frameRef}>
-        <video ref={videoRef} playsInline muted className="camera-video" />
-        {!cameraOn && <div className="camera-placeholder">Κάμερα κλειστή</div>}
-        {cameraOn && flashSupported && (
-          <button
-            type="button"
-            className={`flash-toggle${flashOn ? " is-on" : ""}`}
-            onClick={toggleFlash}
-          >
-            {flashOn ? "🔦 Φλας ON" : "🔦 Φλας"}
-          </button>
-        )}
-        {cameraOn && (
-          <span
-            className={`plate-status-pill${aligned ? " is-aligned" : ""}${
-              distanceHint ? " is-hint" : ""
-            }`}
-          >
-            {aligned
-              ? "✓ Έτοιμο"
-              : distanceHint === "closer"
-              ? "🔎 Λίγο πιο μπροστά"
-              : distanceHint === "back"
-              ? "↔️ Λίγο πιο πίσω"
-              : distanceHint === "blur"
-              ? "🫳 Κράτα σταθερά"
-              : distanceHint === "dark"
-              ? "🔦 Χρειάζεται φως"
-              : distanceHint === "bright"
-              ? "😎 Μείωσε αντηλιά/φλας"
-              : GUIDES[mode].label}
-          </span>
-        )}
-        {cameraOn && (
-          <div
-            className={`plate-guide${aligned ? " is-aligned" : ""}`}
-            style={{
-              width: `${GUIDES[mode].widthFrac * 100}%`,
-              aspectRatio: `${GUIDES[mode].aspect}`,
-            }}
-          />
-        )}
-      </div>
-
-      <div className="btn-row btn-row-end">
-        {!cameraOn ? (
-          <button
-            className="btn btn-primary btn-lg"
-            onClick={startCamera}
-            disabled={disabled}
-          >
-            📷 Άνοιγμα κάμερας
-          </button>
-        ) : (
-          <>
-            <button className="btn btn-ghost" onClick={stopCamera}>
-              Κλείσιμο
-            </button>
-            <button
-              className="btn btn-primary btn-lg"
-              onClick={captureAndRecognize}
-              disabled={ocrRunning}
-            >
-              {ocrRunning ? `Αναγνώριση… ${progress}%` : "🔍 Σκάναρε πινακίδα"}
-            </button>
-          </>
-        )}
-      </div>
-
-      {/* «Μήπως εννοείς...» — η ανάγνωση διαφέρει 1 χαρακτήρα από γνωστό
-          πελάτη αυτού του συνεργείου. Ο χρήστης αποφασίζει, δεν επιβάλλεται. */}
-      {plateSuggestion && (
-        <div className="alert alert-info plate-suggestion">
-          🔎 Μήπως εννοείς <b>{plateSuggestion.plate}</b>
-          {plateSuggestion.name ? ` — ${plateSuggestion.name}` : ""}; Το OCR
-          διάβασε «{plate}».
-          <div className="btn-row">
-            <button
-              type="button"
-              className="btn btn-sm btn-primary"
-              onClick={acceptPlateSuggestion}
-            >
-              Ναι, χρησιμοποίησε αυτή
-            </button>
-            <button
-              type="button"
-              className="btn btn-sm btn-ghost"
-              onClick={dismissPlateSuggestion}
-            >
-              Όχι, κράτα «{plate}»
-            </button>
+          <div className="mode-toggle">
+            {Object.keys(GUIDES).map((key) => (
+              <button
+                key={key}
+                type="button"
+                className={`mode-btn${mode === key ? " is-active" : ""}`}
+                onClick={() => setMode(key)}
+                disabled={ocrRunning}
+              >
+                {key === "car" ? "🚗 Αυτοκίνητο" : "🏍️ Μηχανή"}
+              </button>
+            ))}
           </div>
-        </div>
-      )}
 
-      {/* Ενιαία κάρτα αποτελέσματος σάρωσης — φωτογραφία + βεβαιότητα + μηχανή
-          + τυχόν επιφυλάξεις ΟΛΑ μαζί, ΜΙΑ φορά. Πριν, ο χρήστης έβλεπε την
-          ίδια φωτογραφία δύο φορές σε διαφορετικά σημεία της σελίδας (μία στο
-          verify block, μία ξανά πιο κάτω) — τώρα είναι ένα σημείο ελέγχου,
-          πριν καν διαβάσει το πεδίο πινακίδας. */}
-      {confidence !== null && (
-        <div
-          className="scan-result"
-          style={{
-            borderLeftColor:
-              confidence >= 80 ? "#4ade80" : confidence >= 50 ? "#d97706" : "#f87171",
-          }}
-        >
-          <div className="scan-result-row">
-            {(preview || rawCropPreview) && (
-              <img
-                className="scan-result-thumb"
-                src={preview || rawCropPreview}
-                alt="Λήψη πινακίδας"
+          <div className="camera-frame" ref={frameRef}>
+            <video ref={videoRef} playsInline muted className="camera-video" />
+            {!cameraOn && <div className="camera-placeholder">Κάμερα κλειστή</div>}
+            {cameraOn && flashSupported && (
+              <button
+                type="button"
+                className={`flash-toggle${flashOn ? " is-on" : ""}`}
+                onClick={toggleFlash}
+              >
+                {flashOn ? "🔦 Φλας ON" : "🔦 Φλας"}
+              </button>
+            )}
+            {cameraOn && (
+              <span
+                className={`plate-status-pill${aligned ? " is-aligned" : ""}${
+                  distanceHint ? " is-hint" : ""
+                }`}
+              >
+                {aligned
+                  ? "✓ Έτοιμο"
+                  : distanceHint === "closer"
+                  ? "🔎 Λίγο πιο μπροστά"
+                  : distanceHint === "back"
+                  ? "↔️ Λίγο πιο πίσω"
+                  : distanceHint === "blur"
+                  ? "🫳 Κράτα σταθερά"
+                  : distanceHint === "dark"
+                  ? "🔦 Χρειάζεται φως"
+                  : distanceHint === "bright"
+                  ? "😎 Μείωσε αντηλιά/φλας"
+                  : GUIDES[mode].label}
+              </span>
+            )}
+            {cameraOn && (
+              <div
+                className={`plate-guide${aligned ? " is-aligned" : ""}`}
+                style={{
+                  width: `${GUIDES[mode].widthFrac * 100}%`,
+                  aspectRatio: `${GUIDES[mode].aspect}`,
+                }}
               />
             )}
-            <div className="scan-result-info">
-              <span
-                className="ocr-conf"
-                style={{
-                  color:
-                    confidence >= 80
-                      ? "#4ade80"
-                      : confidence >= 50
-                      ? "#d97706"
-                      : "#f87171",
-                }}
+          </div>
+
+          <div className="btn-row btn-row-end">
+            {!cameraOn ? (
+              <button
+                className="btn btn-primary btn-lg"
+                onClick={startCamera}
+                disabled={disabled}
               >
-                {confidence}% βεβαιότητα
-              </span>
-              <span className="ocr-status-engine">
-                {engineUsed === "plate_recognizer" ? "ALPR" : "tesseract"}
-                {consensusTotal > 1 &&
-                  (disagreement
-                    ? ` · ⚠️ διαφωνία (${consensusTotal} δοκιμές)`
-                    : ` · ✓ ${consensusAgree}/${consensusTotal} λήψεις`)}
-              </span>
-            </div>
+                📷 Άνοιγμα κάμερας
+              </button>
+            ) : (
+              <>
+                <button className="btn btn-ghost" onClick={stopCamera}>
+                  Κλείσιμο
+                </button>
+                <button
+                  className="btn btn-primary btn-lg"
+                  onClick={captureAndRecognize}
+                  disabled={ocrRunning}
+                >
+                  {ocrRunning ? `Αναγνώριση… ${progress}%` : "🔍 Σκάναρε πινακίδα"}
+                </button>
+              </>
+            )}
           </div>
-          {engineFallback && (
-            <div className="scan-result-note">
-              ⚠️ Το ALPR δεν ήταν διαθέσιμο — χρησιμοποιήθηκε το εναλλακτικό
-              tesseract (λιγότερο ακριβές).
-            </div>
-          )}
-          {warnings.length > 0 && (
-            <div className="scan-result-note">
-              ⚠️ Η πινακίδα δεν διαβάστηκε καθαρά: {warnings.join(" · ")}
-            </div>
-          )}
-        </div>
-      )}
 
-      {/* Κύριο πεδίο πινακίδας: κουτάκια-ανά-χαρακτήρα όταν η τιμή ταιριάζει
-          στη μορφή ΧΧΧ-999 ή ΧΧΧ-9999 (πιο εύκολο να ελεγχθεί με μια ματιά),
-          αλλιώς απλό πεδίο κειμένου (π.χ. άδειο, ή μη τυπική πινακίδα). Το
-          μήκος των ψηφίων προσαρμόζεται μόνο του — 3 ή 4, ό,τι διαβάστηκε. */}
-      {!manualPlateEdit && VERIFIABLE_PLATE_RE.test(plate) ? (
-        <div className="plate-field">
-          <div className="plate-field-head">
-            <span className="plate-field-label">ΠΙΝΑΚΙΔΑ</span>
-            <button
-              type="button"
-              className="plate-field-mode-btn"
-              onClick={() => setManualPlateEdit(true)}
-            >
-              ✏️ Ελεύθερη επεξεργασία
-            </button>
-          </div>
-          <PlateVerifyEditor plate={plate} onChange={handlePlateEdit} />
-        </div>
+          {error && <div className="alert alert-error">{error}</div>}
+
+          <button
+            type="button"
+            className="link-btn"
+            onClick={handleManualEntry}
+            disabled={disabled}
+          >
+            ✏️ Πληκτρολόγησε την πινακίδα χειροκίνητα
+          </button>
+        </>
       ) : (
-        <label className="field-label">
-          Πινακίδα (μπορείς να τη διορθώσεις):
-          <input
-            className="input plate-input"
-            type="text"
-            value={plate}
-            placeholder="π.χ. OTM-776 ή ABH-1234"
-            onChange={(e) => handlePlateEdit(e.target.value)}
-          />
-          {VERIFIABLE_PLATE_RE.test(plate) && (
-            <button
-              type="button"
-              className="plate-field-mode-btn plate-field-mode-btn-inline"
-              onClick={() => setManualPlateEdit(false)}
-            >
-              🔢 Ανά χαρακτήρα
-            </button>
+        <>
+          <button
+            type="button"
+            className="link-btn"
+            onClick={handleRetry}
+            disabled={ocrRunning}
+          >
+            ↺ Νέα σάρωση
+          </button>
+
+          {/* «Μήπως εννοείς...» — η ανάγνωση διαφέρει 1 χαρακτήρα από γνωστό
+              πελάτη αυτού του συνεργείου. Ο χρήστης αποφασίζει, δεν επιβάλλεται. */}
+          {plateSuggestion && (
+            <div className="alert alert-info plate-suggestion">
+              🔎 Μήπως εννοείς <b>{plateSuggestion.plate}</b>
+              {plateSuggestion.name ? ` — ${plateSuggestion.name}` : ""}; Το OCR
+              διάβασε «{plate}».
+              <div className="btn-row">
+                <button
+                  type="button"
+                  className="btn btn-sm btn-primary"
+                  onClick={acceptPlateSuggestion}
+                >
+                  Ναι, χρησιμοποίησε αυτή
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost"
+                  onClick={dismissPlateSuggestion}
+                >
+                  Όχι, κράτα «{plate}»
+                </button>
+              </div>
+            </div>
           )}
-        </label>
-      )}
 
-      {/* Οθόνη επιβεβαίωσης — εμφανίζεται ΜΟΝΟ όταν η ανάγνωση δεν είναι
-          αρκετά σίγουρη (επιφυλάξεις parser, χαμηλό confidence, ή διαφωνία
-          ανάμεσα σε πολλαπλές σαρώσεις). Το κουμπί δημιουργίας μένει
-          κλειδωμένο μέχρι ο χρήστης να το επιβεβαιώσει ρητά — μια παθητική
-          προειδοποίηση συχνά προσπερνιέται όταν ο χρήστης βιάζεται. Τα
-          κουτάκια-ανά-χαρακτήρα είναι ήδη ορατά παραπάνω (κύριο πεδίο), και η
-          φωτογραφία ελέγχου είναι ήδη στην κάρτα αποτελέσματος από πάνω —
-          εδώ μένει μόνο το μήνυμα + το checkbox επιβεβαίωσης. */}
-      {needsVerification && (
-        <div className="plate-verify">
-          <div className="alert alert-error">
-            ⚠️{" "}
-            {disagreement
-              ? "Οι λήψεις διαφώνησαν μεταξύ τους"
-              : warnings.length > 0
-              ? "Η πινακίδα δεν διαβάστηκε καθαρά"
-              : "Χαμηλή βεβαιότητα OCR"}{" "}
-            — έλεγξε προσεκτικά κάθε χαρακτήρα πριν συνεχίσεις.
-          </div>
-          <label className="field-label field-checkbox">
-            <input
-              type="checkbox"
-              checked={verified}
-              onChange={(e) => setVerified(e.target.checked)}
-            />
-            ✅ Το επιβεβαιώνω — η πινακίδα παραπάνω είναι σωστή
-          </label>
-        </div>
-      )}
-
-      {isRental && (
-        <details className="rental-section" open>
-          <summary className="rental-section-summary">🚚 Στοιχεία ενοικίασης</summary>
-          <label className="field-label">
-            Σκοπός Κίνησης Οχήματος:
-            <select
-              className="input"
-              value={movementPurpose}
-              onChange={(e) => setMovementPurpose(e.target.value)}
+          {/* Ενιαία κάρτα αποτελέσματος σάρωσης — φωτογραφία + βεβαιότητα +
+              μηχανή + τυχόν επιφυλάξεις ΟΛΑ μαζί, ΜΙΑ φορά. Απουσιάζει τελείως
+              όταν η οθόνη ελέγχου ήρθε από «Πληκτρολόγησε χειροκίνητα» (δεν
+              υπάρχει σάρωση/φωτογραφία να δειχτεί). */}
+          {confidence !== null && (
+            <div
+              className="scan-result"
+              style={{
+                borderLeftColor:
+                  confidence >= 80 ? "#4ade80" : confidence >= 50 ? "#d97706" : "#f87171",
+              }}
             >
-              <option value="">— Επίλεξε —</option>
-              {VEHICLE_MOVEMENT_PURPOSES.map((p) => (
-                <option key={p.value} value={p.value}>
-                  {p.value} — {p.label}
-                </option>
-              ))}
-            </select>
-          </label>
+              <div className="scan-result-row">
+                {(preview || rawCropPreview) && (
+                  <img
+                    className="scan-result-thumb"
+                    src={preview || rawCropPreview}
+                    alt="Λήψη πινακίδας"
+                  />
+                )}
+                <div className="scan-result-info">
+                  <span
+                    className="ocr-conf"
+                    style={{
+                      color:
+                        confidence >= 80
+                          ? "#4ade80"
+                          : confidence >= 50
+                          ? "#d97706"
+                          : "#f87171",
+                    }}
+                  >
+                    {confidence}% βεβαιότητα
+                  </span>
+                  <span className="ocr-status-engine">
+                    {engineUsed === "plate_recognizer" ? "ALPR" : "tesseract"}
+                    {consensusTotal > 1 &&
+                      (disagreement
+                        ? ` · ⚠️ διαφωνία (${consensusTotal} δοκιμές)`
+                        : ` · ✓ ${consensusAgree}/${consensusTotal} λήψεις`)}
+                  </span>
+                </div>
+              </div>
+              {engineFallback && (
+                <div className="scan-result-note">
+                  ⚠️ Το ALPR δεν ήταν διαθέσιμο — χρησιμοποιήθηκε το εναλλακτικό
+                  tesseract (λιγότερο ακριβές).
+                </div>
+              )}
+              {warnings.length > 0 && (
+                <div className="scan-result-note">
+                  ⚠️ Η πινακίδα δεν διαβάστηκε καθαρά: {warnings.join(" · ")}
+                </div>
+              )}
+            </div>
+          )}
 
-          <label className="field-label field-checkbox">
-            <input
-              type="checkbox"
-              checked={diffPickupLocation}
-              onChange={(e) => setDiffPickupLocation(e.target.checked)}
-            />
-            Διαφορετικός τόπος παραλαβής οχήματος
-          </label>
-
-          {diffPickupLocation && (
+          {/* Κύριο πεδίο πινακίδας: κουτάκια-ανά-χαρακτήρα όταν η τιμή ταιριάζει
+              στη μορφή ΧΧΧ-999 ή ΧΧΧ-9999 (πιο εύκολο να ελεγχθεί με μια ματιά),
+              αλλιώς απλό πεδίο κειμένου (π.χ. άδειο, ή μη τυπική πινακίδα). Το
+              μήκος των ψηφίων προσαρμόζεται μόνο του — 3 ή 4, ό,τι διαβάστηκε. */}
+          {!manualPlateEdit && VERIFIABLE_PLATE_RE.test(plate) ? (
+            <div className="plate-field">
+              <div className="plate-field-head">
+                <span className="plate-field-label">ΠΙΝΑΚΙΔΑ</span>
+                <button
+                  type="button"
+                  className="plate-field-mode-btn"
+                  onClick={() => setManualPlateEdit(true)}
+                >
+                  ✏️ Ελεύθερη επεξεργασία
+                </button>
+              </div>
+              <PlateVerifyEditor plate={plate} onChange={handlePlateEdit} />
+            </div>
+          ) : (
             <label className="field-label">
-              Τόπος Παραλαβής:
+              Πινακίδα:
               <input
-                className="input"
+                className="input plate-input"
                 type="text"
-                value={pickupLocation}
-                onChange={(e) => setPickupLocation(e.target.value)}
-                placeholder="π.χ. Αεροδρόμιο Ηρακλείου"
+                value={plate}
+                placeholder="π.χ. OTM-776 ή ABH-1234"
+                onChange={(e) => handlePlateEdit(e.target.value)}
+                autoFocus={reviewMode && !plate}
               />
+              {VERIFIABLE_PLATE_RE.test(plate) && (
+                <button
+                  type="button"
+                  className="plate-field-mode-btn plate-field-mode-btn-inline"
+                  onClick={() => setManualPlateEdit(false)}
+                >
+                  🔢 Ανά χαρακτήρα
+                </button>
+              )}
             </label>
           )}
-        </details>
+
+          {/* Οθόνη επιβεβαίωσης — εμφανίζεται ΜΟΝΟ όταν η ανάγνωση δεν είναι
+              αρκετά σίγουρη (επιφυλάξεις parser, χαμηλό confidence, ή διαφωνία
+              ανάμεσα σε πολλαπλές σαρώσεις). Το κουμπί δημιουργίας μένει
+              κλειδωμένο μέχρι ο χρήστης να το επιβεβαιώσει ρητά — μια παθητική
+              προειδοποίηση συχνά προσπερνιέται όταν ο χρήστης βιάζεται. Τα
+              κουτάκια-ανά-χαρακτήρα είναι ήδη ορατά παραπάνω (κύριο πεδίο), και
+              η φωτογραφία ελέγχου είναι ήδη στην κάρτα αποτελέσματος από πάνω —
+              εδώ μένει μόνο το μήνυμα + το checkbox επιβεβαίωσης. */}
+          {needsVerification && (
+            <div className="plate-verify">
+              <div className="alert alert-error">
+                ⚠️{" "}
+                {disagreement
+                  ? "Οι λήψεις διαφώνησαν μεταξύ τους"
+                  : warnings.length > 0
+                  ? "Η πινακίδα δεν διαβάστηκε καθαρά"
+                  : "Χαμηλή βεβαιότητα OCR"}{" "}
+                — έλεγξε προσεκτικά κάθε χαρακτήρα πριν συνεχίσεις.
+              </div>
+              <label className="field-label field-checkbox">
+                <input
+                  type="checkbox"
+                  checked={verified}
+                  onChange={(e) => setVerified(e.target.checked)}
+                />
+                ✅ Το επιβεβαιώνω — η πινακίδα παραπάνω είναι σωστή
+              </label>
+            </div>
+          )}
+
+          {isRental && (
+            <details className="rental-section" open>
+              <summary className="rental-section-summary">🚚 Στοιχεία ενοικίασης</summary>
+              <label className="field-label">
+                Σκοπός Κίνησης Οχήματος:
+                <select
+                  className="input"
+                  value={movementPurpose}
+                  onChange={(e) => setMovementPurpose(e.target.value)}
+                >
+                  <option value="">— Επίλεξε —</option>
+                  {VEHICLE_MOVEMENT_PURPOSES.map((p) => (
+                    <option key={p.value} value={p.value}>
+                      {p.value} — {p.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="field-label field-checkbox">
+                <input
+                  type="checkbox"
+                  checked={diffPickupLocation}
+                  onChange={(e) => setDiffPickupLocation(e.target.checked)}
+                />
+                Διαφορετικός τόπος παραλαβής οχήματος
+              </label>
+
+              {diffPickupLocation && (
+                <label className="field-label">
+                  Τόπος Παραλαβής:
+                  <input
+                    className="input"
+                    type="text"
+                    value={pickupLocation}
+                    onChange={(e) => setPickupLocation(e.target.value)}
+                    placeholder="π.χ. Αεροδρόμιο Ηρακλείου"
+                  />
+                </label>
+              )}
+            </details>
+          )}
+
+          {error && <div className="alert alert-error">{error}</div>}
+
+          {/* 100% σίγουρη ανάγνωση, χωρίς επιφυλάξεις -> καθοδήγησε καθαρά τον
+              χρήστη στο επόμενο βήμα αντί να τον αφήσουμε να αναρωτιέται τι
+              κάνει μετά. */}
+          {isPerfect && (
+            <div className="scan-success-hint">
+              <span className="scan-success-check">✓ Άψογη ανάγνωση!</span>
+              <span className="scan-success-arrow">⌄</span>
+            </div>
+          )}
+
+          <div className="sticky-cta">
+            <button
+              className={`btn btn-block${isPerfect ? " btn-success" : " btn-primary"}`}
+              onClick={handleConfirm}
+              disabled={disabled || ocrRunning || (needsVerification && !verified)}
+            >
+              {needsVerification && !verified
+                ? "🔒 Επιβεβαίωσε την πινακίδα παραπάνω"
+                : isPerfect
+                ? "✓ Δημιουργία εγγραφής"
+                : "➕ Δημιουργία εγγραφής"}
+            </button>
+          </div>
+        </>
       )}
-
-      {error && <div className="alert alert-error">{error}</div>}
-
-      {/* 100% σίγουρη ανάγνωση, χωρίς επιφυλάξεις -> καθοδήγησε καθαρά τον
-          χρήστη στο επόμενο βήμα αντί να τον αφήσουμε να αναρωτιέται τι
-          κάνει μετά. */}
-      {isPerfect && (
-        <div className="scan-success-hint">
-          <span className="scan-success-check">✓ Άψογη ανάγνωση!</span>
-          <span className="scan-success-arrow">⌄</span>
-        </div>
-      )}
-
-      <div className="sticky-cta">
-        <button
-          className={`btn btn-block${isPerfect ? " btn-success" : " btn-primary"}`}
-          onClick={handleConfirm}
-          disabled={disabled || ocrRunning || (needsVerification && !verified)}
-        >
-          {needsVerification && !verified
-            ? "🔒 Επιβεβαίωσε την πινακίδα παραπάνω"
-            : isPerfect
-            ? "✓ Δημιουργία εγγραφής"
-            : "➕ Δημιουργία εγγραφής"}
-        </button>
-      </div>
     </div>
   );
 }
