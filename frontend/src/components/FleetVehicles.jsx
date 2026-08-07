@@ -4,7 +4,7 @@
 // επιτρέπει επιλογή ΜΟΝΟ από αυτή τη λίστα (dropdown, όχι ελεύθερο κείμενο) —
 // το backend το επιβάλλει ούτως ή άλλως (δες create_entry: 400 αν η πινακίδα
 // δεν ανήκει στον στόλο).
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   getFleetVehicles,
   createFleetVehicle,
@@ -12,6 +12,23 @@ import {
   deleteFleetVehicle,
 } from "../services/api";
 import { normalizePlateInput } from "../utils";
+
+// Καταστάσεις που σημαίνουν "το όχημα είναι έξω, δεν έχει επιστραφεί ακόμα".
+const ACTIVE_RENTAL_STATUSES = new Set(["open", "in_progress"]);
+
+// Διαθέσιμο (λαχανί) / Ενοικιασμένο (κίτρινο) / Θέμα με τον χρόνο επιστροφής (κόκκινο)
+function vehicleStatus(plate, entries) {
+  let rented = false;
+  let overdue = false;
+  for (const e of entries || []) {
+    if (e.plate !== plate || !ACTIVE_RENTAL_STATUSES.has(e.status)) continue;
+    rented = true;
+    if (e.isOverdue) overdue = true;
+  }
+  if (overdue) return { key: "overdue", label: "Εκπρόθεσμο", cls: "vehicle-status-overdue" };
+  if (rented) return { key: "rented", label: "Ενοικιασμένο", cls: "vehicle-status-rented" };
+  return { key: "available", label: "Διαθέσιμο", cls: "vehicle-status-available" };
+}
 
 function EditRow({ vehicle, onCancel, onSaved }) {
   const [plate, setPlate] = useState(vehicle.plate || "");
@@ -81,7 +98,7 @@ function EditRow({ vehicle, onCancel, onSaved }) {
   );
 }
 
-export default function FleetVehicles() {
+export default function FleetVehicles({ entries }) {
   const [vehicles, setVehicles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -198,6 +215,7 @@ export default function FleetVehicles() {
               <tr>
                 <th>Πινακίδα</th>
                 <th>Περιγραφή</th>
+                <th>Κατάσταση</th>
                 <th />
               </tr>
             </thead>
@@ -220,10 +238,16 @@ export default function FleetVehicles() {
                     />
                   );
                 }
+                const status = vehicleStatus(v.plate, entries);
                 return (
                   <tr key={v.id}>
                     <td className="mono">{v.plate}</td>
                     <td>{v.label || "—"}</td>
+                    <td>
+                      <span className={`vehicle-status-badge ${status.cls}`}>
+                        {status.label}
+                      </span>
+                    </td>
                     <td style={{ display: "flex", gap: "8px" }}>
                       <button
                         type="button"

@@ -543,7 +543,7 @@ function AuthenticatedApp({ workshop, onLogout, onWorkshopUpdated }) {
         {tab === "history" && (
           <HistoryLog entries={entries} loading={loading} onRefresh={refresh} />
         )}
-        {tab === "fleet" && isRental && <FleetVehicles />}
+        {tab === "fleet" && isRental && <FleetVehicles entries={entries} />}
         {tab === "ocr-stats" && <OcrStats />}
         {tab === "settings" && (
           <SettingsAccordion

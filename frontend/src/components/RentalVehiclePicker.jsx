@@ -58,6 +58,16 @@ export default function RentalVehiclePicker({ onConfirm, disabled, entries }) {
     [vehicles, busyPlates]
   );
 
+  // Πινακίδες που είναι σε ανοιχτή ενοικίαση ΚΑΙ έχει περάσει η αναμενόμενη
+  // ημερομηνία επιστροφής -> κόκκινο (θέμα καιρός), αλλιώς κίτρινο.
+  const overduePlates = useMemo(() => {
+    const set = new Set();
+    for (const e of entries || []) {
+      if (ACTIVE_RENTAL_STATUSES.has(e.status) && e.isOverdue) set.add(e.plate);
+    }
+    return set;
+  }, [entries]);
+
   function handleSelect(v) {
     if (disabled) return;
     setPlate(v.plate);
@@ -120,12 +130,12 @@ export default function RentalVehiclePicker({ onConfirm, disabled, entries }) {
               <button
                 key={v.id}
                 type="button"
-                className={`vehicle-pick-btn ${plate === v.plate ? "vehicle-pick-btn-active" : ""}`}
+                className={`vehicle-pick-btn vehicle-pick-btn-available ${plate === v.plate ? "vehicle-pick-btn-active" : ""}`}
                 onClick={() => handleSelect(v)}
                 disabled={disabled}
               >
                 <span className="mono">{v.plate}</span>
-                {v.label && <span className="muted small">{v.label}</span>}
+                {v.label && <span className="small">{v.label}</span>}
               </button>
             ))}
           </div>
@@ -136,12 +146,18 @@ export default function RentalVehiclePicker({ onConfirm, disabled, entries }) {
                 Σε ενοικίαση τώρα (μη διαθέσιμα):
               </p>
               <div className="vehicle-picker-list">
-                {unavailableVehicles.map((v) => (
-                  <div key={v.id} className="vehicle-pick-btn vehicle-pick-btn-disabled">
-                    <span className="mono">{v.plate}</span>
-                    {v.label && <span className="muted small">{v.label}</span>}
-                  </div>
-                ))}
+                {unavailableVehicles.map((v) => {
+                  const overdue = overduePlates.has(v.plate);
+                  return (
+                    <div
+                      key={v.id}
+                      className={`vehicle-pick-btn vehicle-pick-btn-disabled ${overdue ? "vehicle-pick-btn-overdue" : "vehicle-pick-btn-rented"}`}
+                    >
+                      <span className="mono">{v.plate}</span>
+                      {v.label && <span className="small">{v.label}</span>}
+                    </div>
+                  );
+                })}
               </div>
             </>
           )}

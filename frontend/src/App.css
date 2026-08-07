@@ -766,7 +766,69 @@ textarea.input {
 }
 .vehicle-pick-btn-disabled {
   cursor: not-allowed;
-  opacity: 0.55;
+}
+
+/* Κατάσταση οχήματος — φόντο ελαφρύ/παστέλ, σκούρο κείμενο για ευδιάκριτη
+   αντίθεση (τα var(--text)/var(--muted) είναι ανοιχτόχρωμα, φτιαγμένα για
+   σκούρο φόντο, οπότε εδώ τα παρακάμπτουμε ρητά). */
+.vehicle-pick-btn-available {
+  background: #dcfce7;
+  border-color: #86efac;
+}
+.vehicle-pick-btn-available .mono,
+.vehicle-pick-btn-available .small {
+  color: #14532d;
+}
+.vehicle-pick-btn-available.vehicle-pick-btn-active {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+.vehicle-pick-btn-available.vehicle-pick-btn-active .mono,
+.vehicle-pick-btn-available.vehicle-pick-btn-active .small {
+  color: #fff;
+}
+
+.vehicle-pick-btn-rented {
+  background: #fef9c3;
+  border-color: #fde047;
+}
+.vehicle-pick-btn-rented .mono,
+.vehicle-pick-btn-rented .small {
+  color: #713f12;
+}
+
+.vehicle-pick-btn-overdue {
+  background: #fee2e2;
+  border-color: #fca5a5;
+}
+.vehicle-pick-btn-overdue .mono,
+.vehicle-pick-btn-overdue .small {
+  color: #7f1d1d;
+}
+
+.vehicle-status-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.vehicle-status-available {
+  background: #dcfce7;
+  border-color: #86efac;
+  color: #14532d;
+}
+.vehicle-status-rented {
+  background: #fef9c3;
+  border-color: #fde047;
+  color: #713f12;
+}
+.vehicle-status-overdue {
+  background: #fee2e2;
+  border-color: #fca5a5;
+  color: #7f1d1d;
 }
 .entry-recon {
   margin-top: 4px;
