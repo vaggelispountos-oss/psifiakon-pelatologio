@@ -162,6 +162,14 @@ class DclEntry(db.Model):
     """
 
     __tablename__ = "dcl_entries"
+    __table_args__ = (
+        # Το /api/dcl/entries κάνει filter_by(workshop_id) + order_by(
+        # created_at desc) + count(). Με index ΜΟΝΟ στο workshop_id, η βάση
+        # διαβάζει ΟΛΕΣ τις εγγραφές του συνεργείου και τις ταξινομεί στη
+        # μνήμη σε κάθε φόρτωση της λίστας. Composite index -> η ταξινόμηση
+        # έρχεται δωρεάν από το index.
+        db.Index("ix_entries_workshop_created", "workshop_id", "created_at"),
+    )
 
     id = db.Column(db.Integer, primary_key=True)
     workshop_id = db.Column(
@@ -452,6 +460,11 @@ class OcrMetric(db.Model):
     """
 
     __tablename__ = "ocr_metrics"
+    __table_args__ = (
+        # Ίδιο μοτίβο με το dcl_entries — μία γραμμή ΑΝΑ σάρωση πινακίδας,
+        # άρα ο πίνακας μεγαλώνει πολύ πιο γρήγορα από τις εγγραφές.
+        db.Index("ix_metrics_workshop_created", "workshop_id", "created_at"),
+    )
 
     id = db.Column(db.Integer, primary_key=True)
     workshop_id = db.Column(

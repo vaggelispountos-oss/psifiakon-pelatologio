@@ -23,6 +23,7 @@ Routes:
 --------------------------------------------------------------------
 """
 import os
+import secrets
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
@@ -119,7 +120,9 @@ def register_routes(app):
                 return jsonify(
                     {"error": "Ο server δεν έχει ρυθμιστεί (λείπει INGEST_KEY)."}
                 ), 503
-        elif request.headers.get("X-Telemetry-Key") != expected_key:
+        elif not secrets.compare_digest(
+            request.headers.get("X-Telemetry-Key", ""), expected_key
+        ):
             return jsonify({"error": "Μη έγκυρο κλειδί."}), 401
 
         data = request.get_json(silent=True) or {}
@@ -152,7 +155,7 @@ def register_routes(app):
         if not expected_key:
             if not _is_local_dev():
                 return "Ο server δεν έχει ρυθμιστεί (λείπει DASHBOARD_KEY).", 503
-        elif request.args.get("key") != expected_key:
+        elif not secrets.compare_digest(request.args.get("key", ""), expected_key):
             return "Μη εξουσιοδοτημένη πρόσβαση.", 401
 
         rows = CentralMetric.query.order_by(CentralMetric.received_at.desc()).all()

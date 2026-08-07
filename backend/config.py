@@ -174,6 +174,19 @@ def validate_production_config(config=Config):
             "Όρισέ το στο .env (python -c \"from cryptography.fernet import "
             "Fernet; print(Fernet.generate_key().decode())\")."
         )
+    # ⚠️ ΠΡΟΕΙΔΟΠΟΙΗΣΗ, ΟΧΙ σφάλμα — σκόπιμα.
+    # Το CORS_ORIGINS είναι σήμερα `sync: false` στο render.yaml (δηλαδή
+    # χωρίς τιμή -> "*"). Αν αυτό γινόταν hard failure, το ΕΠΟΜΕΝΟ deploy θα
+    # έριχνε το production αντί απλώς να το κάνει πιο ασφαλές.
+    # ΕΠΟΜΕΝΟ ΒΗΜΑ: όρισε CORS_ORIGINS στο Render dashboard με το πραγματικό
+    # origin του frontend, ΜΕΤΑ μετέτρεψε αυτό σε problems.append(...) ώστε
+    # να μη μπορεί να ξαναφύγει ανασφαλές σε production.
+    if config.CORS_ORIGINS == "*":
+        print(
+            "[config] ΠΡΟΣΟΧΗ: CORS_ORIGINS='*' σε production — οποιοδήποτε "
+            "site μπορεί να καλέσει το API από τον browser του χρήστη. Όρισε "
+            "το πραγματικό origin του frontend στο Render."
+        )
     if problems:
         raise RuntimeError(
             "Μη ασφαλής ρύθμιση production:\n- " + "\n- ".join(problems)

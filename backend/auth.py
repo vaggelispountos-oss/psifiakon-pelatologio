@@ -141,7 +141,10 @@ def require_admin(fn):
 
         expected = current_app.config.get("ADMIN_KEY")
         provided = request.headers.get("X-Admin-Key", "")
-        if not expected or provided != expected:
+        # compare_digest: σύγκριση σταθερού χρόνου. Το `!=` σε strings
+        # τερματίζει στον πρώτο διαφορετικό χαρακτήρα, δίνοντας timing
+        # oracle που επιτρέπει ανακατασκευή του κλειδιού χαρακτήρα-χαρακτήρα.
+        if not expected or not secrets.compare_digest(provided, expected):
             return jsonify({"error": "Μη έγκυρο ή λείπον admin key."}), 401
         return fn(*args, **kwargs)
 
