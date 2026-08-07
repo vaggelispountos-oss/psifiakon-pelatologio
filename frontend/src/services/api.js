@@ -411,17 +411,17 @@ export function getFleetVehicles() {
   return request("/api/fleet-vehicles");
 }
 
-export function createFleetVehicle({ plate, label }) {
+export function createFleetVehicle({ plate, label, category }) {
   return request("/api/fleet-vehicles", {
     method: "POST",
-    body: { plate, label },
+    body: { plate, label, category },
   });
 }
 
-export function updateFleetVehicle(id, { plate, label }) {
+export function updateFleetVehicle(id, { plate, label, category }) {
   return request(`/api/fleet-vehicles/${id}`, {
     method: "PATCH",
-    body: { plate, label },
+    body: { plate, label, category },
   });
 }
 

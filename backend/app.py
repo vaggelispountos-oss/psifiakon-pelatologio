@@ -170,6 +170,11 @@ def _opt_int(value):
         return None
 
 
+# Κατηγορίες οχημάτων στόλου (Ενοικιάσεις) — χρησιμοποιείται για ομαδοποίηση
+# στη λίστα επιλογής οχήματος (RentalVehiclePicker) καθώς και για validation
+# στο create/update fleet vehicle.
+VEHICLE_CATEGORIES = {"car", "motorcycle", "atv", "bicycle", "ebike", "other"}
+
 # Ελληνικά γράμματα πινακίδας -> λατινικό οπτικό αντίστοιχο (ίδια αντιστοίχιση
 # με frontend/src/utils.js GREEK_TO_LATIN). Χρειάζεται ΚΑΙ εδώ γιατί το
 # vehicleRegistrationNumber της ΑΑΔΕ και η στήλη plate περιμένουν λατινικά,
@@ -495,10 +500,15 @@ def register_routes(app):
         if existing is not None:
             raise ApiError("Η πινακίδα υπάρχει ήδη στον στόλο.")
 
+        category = (data.get("category") or "").strip().lower() or None
+        if category and category not in VEHICLE_CATEGORIES:
+            raise ApiError("Μη έγκυρη κατηγορία οχήματος.")
+
         vehicle = FleetVehicle(
             workshop_id=g.workshop_id,
             plate=plate,
             label=(data.get("label") or "").strip() or None,
+            category=category,
         )
         db.session.add(vehicle)
         db.session.commit()
@@ -528,6 +538,11 @@ def register_routes(app):
             vehicle.plate = plate
         if "label" in data:
             vehicle.label = (data.get("label") or "").strip() or None
+        if "category" in data:
+            category = (data.get("category") or "").strip().lower() or None
+            if category and category not in VEHICLE_CATEGORIES:
+                raise ApiError("Μη έγκυρη κατηγορία οχήματος.")
+            vehicle.category = category
 
         db.session.commit()
         return jsonify(vehicle.to_dict())

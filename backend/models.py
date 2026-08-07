@@ -125,6 +125,10 @@ class FleetVehicle(db.Model):
     )
     plate = db.Column(db.String(20), nullable=False)
     label = db.Column(db.String(100), nullable=True)  # π.χ. "Toyota Yaris λευκό"
+    # car | motorcycle | atv | bicycle | ebike | other — δες VEHICLE_CATEGORIES
+    # στο app.py. Nullable για συμβατότητα με ήδη υπάρχοντα οχήματα (auto-
+    # migration προσθέτει τη στήλη ως NULL σε παλιές εγκαταστάσεις).
+    category = db.Column(db.String(20), nullable=True)
     created_at = db.Column(db.DateTime, default=utcnow)
 
     def to_dict(self):
@@ -132,6 +136,7 @@ class FleetVehicle(db.Model):
             "id": self.id,
             "plate": self.plate,
             "label": self.label,
+            "category": self.category or "car",
             "createdAt": self.created_at.isoformat() if self.created_at else None,
         }
 

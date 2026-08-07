@@ -18,6 +18,17 @@ export const BUSINESS_TYPES = [
   },
 ];
 
+// Κατηγορία οχήματος στόλου (μόνο Ενοικιάσεις, τοπικό πεδίο — ΔΕΝ πάει στην
+// ΑΑΔΕ). Χρησιμοποιείται για ομαδοποίηση στη λίστα επιλογής οχήματος.
+export const VEHICLE_CATEGORIES = [
+  { value: "car", icon: "🚗", label: "Αμάξια" },
+  { value: "motorcycle", icon: "🏍️", label: "Μηχανάκια" },
+  { value: "atv", icon: "🛺", label: "Γουρούνες (ATV/Buggy)" },
+  { value: "bicycle", icon: "🚲", label: "Ποδήλατα" },
+  { value: "ebike", icon: "🔋", label: "Ηλεκτρικά Ποδήλατα" },
+  { value: "other", icon: "🚙", label: "Άλλο" },
+];
+
 // Σκοπός Κίνησης Οχήματος (1ος Χρόνος, ΜΟΝΟ Ενοικιάσεις) — επίσημες τιμές
 // από το «Ψηφιακό Πελατολόγιο ΑΑΔΕ — Τεχνική Περιγραφή Διεπαφών REST API»
 // (DCL API Documentation v1.0, §5.1.1, σελ. 18: πεδίο vehicleMovementPurpose).

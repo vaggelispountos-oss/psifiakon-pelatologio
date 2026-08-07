@@ -12,6 +12,13 @@ import {
   deleteFleetVehicle,
 } from "../services/api";
 import { normalizePlateInput } from "../utils";
+import { VEHICLE_CATEGORIES } from "../constants";
+
+function categoryMeta(value) {
+  return (
+    VEHICLE_CATEGORIES.find((c) => c.value === value) || VEHICLE_CATEGORIES[0]
+  );
+}
 
 // Καταστάσεις που σημαίνουν "το όχημα είναι έξω, δεν έχει επιστραφεί ακόμα".
 const ACTIVE_RENTAL_STATUSES = new Set(["open", "in_progress"]);
@@ -33,6 +40,7 @@ function vehicleStatus(plate, entries) {
 function EditRow({ vehicle, onCancel, onSaved }) {
   const [plate, setPlate] = useState(vehicle.plate || "");
   const [label, setLabel] = useState(vehicle.label || "");
+  const [category, setCategory] = useState(vehicle.category || "car");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -44,6 +52,7 @@ function EditRow({ vehicle, onCancel, onSaved }) {
       const updated = await updateFleetVehicle(vehicle.id, {
         plate: normalizePlateInput(plate),
         label: label.trim(),
+        category,
       });
       onSaved(updated);
     } catch (err) {
@@ -55,7 +64,7 @@ function EditRow({ vehicle, onCancel, onSaved }) {
 
   return (
     <tr className="customer-edit-row">
-      <td colSpan={3}>
+      <td colSpan={4}>
         <form onSubmit={handleSave} className="customer-edit-form">
           <label className="field-label">
             Πινακίδα
@@ -73,6 +82,20 @@ function EditRow({ vehicle, onCancel, onSaved }) {
               onChange={(e) => setLabel(e.target.value)}
               placeholder="π.χ. Toyota Yaris λευκό"
             />
+          </label>
+          <label className="field-label">
+            Κατηγορία
+            <select
+              className="input"
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+            >
+              {VEHICLE_CATEGORIES.map((c) => (
+                <option key={c.value} value={c.value}>
+                  {c.icon} {c.label}
+                </option>
+              ))}
+            </select>
           </label>
           {error && (
             <div className="alert alert-error" style={{ flex: "1 1 100%" }}>
@@ -106,6 +129,7 @@ export default function FleetVehicles({ entries }) {
 
   const [newPlate, setNewPlate] = useState("");
   const [newLabel, setNewLabel] = useState("");
+  const [newCategory, setNewCategory] = useState("car");
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState("");
 
@@ -136,12 +160,17 @@ export default function FleetVehicles({ entries }) {
     setAdding(true);
     setAddError("");
     try {
-      const created = await createFleetVehicle({ plate, label: newLabel.trim() });
+      const created = await createFleetVehicle({
+        plate,
+        label: newLabel.trim(),
+        category: newCategory,
+      });
       setVehicles((prev) =>
         [...prev, created].sort((a, b) => a.plate.localeCompare(b.plate))
       );
       setNewPlate("");
       setNewLabel("");
+      setNewCategory("car");
     } catch (err) {
       setAddError(err.message);
     } finally {
@@ -192,6 +221,20 @@ export default function FleetVehicles({ entries }) {
             placeholder="π.χ. Toyota Yaris λευκό"
           />
         </label>
+        <label className="field-label">
+          Κατηγορία
+          <select
+            className="input"
+            value={newCategory}
+            onChange={(e) => setNewCategory(e.target.value)}
+          >
+            {VEHICLE_CATEGORIES.map((c) => (
+              <option key={c.value} value={c.value}>
+                {c.icon} {c.label}
+              </option>
+            ))}
+          </select>
+        </label>
         {addError && (
           <div className="alert alert-error" style={{ flex: "1 1 100%" }}>
             {addError}
@@ -215,6 +258,7 @@ export default function FleetVehicles({ entries }) {
               <tr>
                 <th>Πινακίδα</th>
                 <th>Περιγραφή</th>
+                <th>Κατηγορία</th>
                 <th>Κατάσταση</th>
                 <th />
               </tr>
@@ -239,10 +283,14 @@ export default function FleetVehicles({ entries }) {
                   );
                 }
                 const status = vehicleStatus(v.plate, entries);
+                const cat = categoryMeta(v.category);
                 return (
                   <tr key={v.id}>
                     <td className="mono">{v.plate}</td>
                     <td>{v.label || "—"}</td>
+                    <td>
+                      {cat.icon} {cat.label}
+                    </td>
                     <td>
                       <span className={`vehicle-status-badge ${status.cls}`}>
                         {status.label}

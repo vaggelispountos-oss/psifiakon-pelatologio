@@ -267,7 +267,15 @@ function AuthenticatedApp({ workshop, onLogout, onWorkshopUpdated }) {
         `Δημιουργήθηκε εγγραφή! idDcl: ${res.idDcl} (ώρα: ${res.creationDateTime})`
       );
       await refresh();
-      setActiveEntryId(res.entry_id); // ανοίγει στον 2ο Χρόνο (status=open)
+      // Συνεργεία: ανοίγει κατευθείαν στον 2ο Χρόνο (κατηγορία εργασίας) —
+      // γίνεται την ίδια στιγμή, έχει νόημα να συνεχίσεις αμέσως.
+      // Ενοικιάσεις: η Ολοκλήρωση (3ος Χρόνος) γίνεται μέρες αργότερα, στην
+      // επιστροφή — η «Λειτουργία» πρέπει να ξαναδείξει καθαρή τη λίστα
+      // οχημάτων, όχι τη φόρμα Ολοκλήρωσης. Η επιστροφή γίνεται από το tab
+      // «Εγγραφές» όταν έρθει η ώρα.
+      if (!isRental) {
+        setActiveEntryId(res.entry_id);
+      }
     } catch (err) {
       notify("error", err.message);
     } finally {

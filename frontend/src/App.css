@@ -737,6 +737,12 @@ textarea.input {
 }
 
 /* Rental vehicle picker — λίστα διαθέσιμων οχημάτων (κλικ αντί για dropdown) */
+.vehicle-category-heading {
+  margin: 0 0 4px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
 .vehicle-picker-list {
   display: flex;
   flex-wrap: wrap;
