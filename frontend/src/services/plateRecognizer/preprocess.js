@@ -55,14 +55,22 @@ export function preprocessForOcr(
  * με preprocessForOcr (διπλή πολικότητα + αφαίρεση θορύβου) αλλά σε πολύ
  * μικρότερη ανάλυση και ΧΩΡΙΣ να φτιάξει το τελικό canvas.
  *
- * @returns {{ok: boolean, kept: number, coverage: number, touchesEdge: boolean}}
+ * @returns {{ok: boolean, kept: number, coverage: number, touchesEdge: boolean,
+ *   sharpness: number, brightness: number}}
  *   kept = πόσα «character blobs» βρέθηκαν, coverage = πόσο πλάτος του crop
  *   καλύπτουν άκρη-σε-άκρη (0..1), touchesEdge = κάποιος χαρακτήρας αγγίζει
  *   την άκρη του crop (η πινακίδα ξεφεύγει από το πλαίσιο — πολύ κοντά,
  *   ΟΧΙ μακριά, ανεξάρτητα από το πόσο «μικρή» δείχνει η coverage).
+ *   sharpness = διακύμανση Laplacian στην ΑΚΑΤΕΡΓΑΣΤΗ (πριν το contrast
+ *   stretch) εικόνα — χαμηλή τιμή = θολή/κουνημένη λήψη (βλ. MIN_SHARPNESS).
+ *   brightness = μέση φωτεινότητα 0-255 πριν το stretch — πολύ χαμηλή/υψηλή
+ *   σημαίνει σκοτάδι/υπερέκθεση (φλας/αντηλιά), βλ. MIN/MAX_BRIGHTNESS.
  */
 export function assessPlateAlignment(source, { targetWidth = 450 } = {}) {
-  const { gray, w, h, threshold } = grayscaleAndThreshold(source, targetWidth);
+  const { gray, grayRaw, w, h, threshold, brightness } = grayscaleAndThreshold(
+    source,
+    targetWidth
+  );
   const darkOnLight = toBinary(gray, w, h, threshold, false);
   const lightOnDark = toBinary(gray, w, h, threshold, true);
   const best = pickPolarity(keepCharacterBlobs(darkOnLight), keepCharacterBlobs(lightOnDark));
@@ -71,7 +79,41 @@ export function assessPlateAlignment(source, { targetWidth = 450 } = {}) {
     kept: best.kept,
     coverage: best.coverage || 0,
     touchesEdge: !!best.touchesEdge,
+    sharpness: laplacianVariance(grayRaw, w, h),
+    brightness,
   };
+}
+
+// Κατώφλια ποιότητας εικόνας — εμπειρικά (heuristic), ΟΧΙ βαθμονομημένα με
+// πραγματικές μετρήσεις σε πολλές συσκευές/κάμερες. Σκόπιμα ΣΥΝΤΗΡΗΤΙΚΑ
+// (πιάνουν μόνο τις προφανείς περιπτώσεις) ώστε να ΜΗΝ μπλοκάρουν άδικα το
+// auto-scan σε οριακά αλλά αναγνώσιμα frames — ένα false positive εδώ
+// σημαίνει «η πλάκα δεν σκανάρει ποτέ», χειρότερο από ένα χαμένο auto-scan.
+// Αν φανεί στην πράξη ότι μπλοκάρει σωστές λήψεις, ΑΝΕΒΑΣΕ το MIN_SHARPNESS·
+// αν αφήνει να περνούν ολοφάνερα θολές, ΚΑΤΕΒΑΣΕ το.
+export const MIN_SHARPNESS = 12;
+export const MIN_BRIGHTNESS = 35;
+export const MAX_BRIGHTNESS = 220;
+
+/** Διακύμανση Laplacian — τυπικό, γρήγορο μέτρο θόλωσης (edge/high-freq content). */
+function laplacianVariance(gray, w, h) {
+  let sum = 0;
+  let sumSq = 0;
+  let n = 0;
+  for (let y = 1; y < h - 1; y++) {
+    const row = y * w;
+    for (let x = 1; x < w - 1; x++) {
+      const idx = row + x;
+      const lap =
+        gray[idx - 1] + gray[idx + 1] + gray[idx - w] + gray[idx + w] - 4 * gray[idx];
+      sum += lap;
+      sumSq += lap * lap;
+      n++;
+    }
+  }
+  if (!n) return 0;
+  const mean = sum / n;
+  return sumSq / n - mean * mean;
 }
 
 // Μια ελληνική πινακίδα έχει 6 (μηχανή) ή 7 (αυτοκίνητο) χαρακτήρες.
@@ -101,7 +143,16 @@ function pickPolarity(a, b) {
 // --------------------------------------------------------------------
 // 1-3) Upscale + grayscale + contrast stretch + Otsu
 // --------------------------------------------------------------------
-/** @returns {{gray: Uint8ClampedArray, w: number, h: number, threshold: number}} */
+/**
+ * @returns {{gray: Uint8ClampedArray, grayRaw: Uint8ClampedArray, w: number,
+ *   h: number, threshold: number, brightness: number}}
+ *   `gray` έχει περάσει από contrast stretch (χρησιμοποιείται για threshold/
+ *   binarization). `grayRaw` και `brightness` είναι ΠΡΙΝ το stretch — το
+ *   stretch κανονικοποιεί πάντα στο πλήρες [0,255] εύρος, οπότε μια σκοτεινή
+ *   ή θολή λήψη θα φαινόταν τεχνητά «καθαρή»/«κανονικά φωτισμένη» αν μετρούσαμε
+ *   πάνω στο ήδη τεντωμένο `gray` — θα χανόταν ακριβώς αυτό που θέλουμε να
+ *   ανιχνεύσουμε.
+ */
 function grayscaleAndThreshold(source, targetWidth) {
   const sw = source.width || source.videoWidth;
   const sh = source.height || source.videoHeight;
@@ -121,16 +172,22 @@ function grayscaleAndThreshold(source, targetWidth) {
   const d = ctx.getImageData(0, 0, w, h).data;
   const n = w * h;
 
-  // Grayscale + εύρεση min/max φωτεινότητας
+  // Grayscale + εύρεση min/max φωτεινότητας. Κρατάμε ΚΑΙ ένα ακατέργαστο
+  // αντίγραφο (πριν το stretch) για τα quality metrics (sharpness/brightness).
   const gray = new Uint8ClampedArray(n);
+  const grayRaw = new Uint8ClampedArray(n);
   let min = 255;
   let max = 0;
+  let brightnessSum = 0;
   for (let i = 0, p = 0; i < d.length; i += 4, p++) {
     const g = (d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114) | 0;
     gray[p] = g;
+    grayRaw[p] = g;
+    brightnessSum += g;
     if (g < min) min = g;
     if (g > max) max = g;
   }
+  const brightness = n ? brightnessSum / n : 0;
 
   // Contrast stretch (normalization) στο [0,255]
   const range = Math.max(1, max - min);
@@ -162,7 +219,7 @@ function grayscaleAndThreshold(source, targetWidth) {
     }
   }
 
-  return { gray, w, h, threshold };
+  return { gray, grayRaw, w, h, threshold, brightness };
 }
 
 /**
