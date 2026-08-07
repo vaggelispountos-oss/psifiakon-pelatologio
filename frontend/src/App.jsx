@@ -4,6 +4,7 @@
 // Όλα τα δεδομένα περνούν από το backend (καθόλου localStorage).
 // --------------------------------------------------------------------
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   API_URL,
   addService,
@@ -158,8 +159,18 @@ function AuthenticatedApp({ workshop, onLogout, onWorkshopUpdated }) {
   // (όχι τοπικό state μέσα στο Archive) ώστε το «Λεπτομέρειες» στο tab
   // «Εγγραφές» να μπορεί να ανοίξει κατευθείαν στο Ιστορικό.
   const [archiveView, setArchiveView] = useState("customers");
-  const [entries, setEntries] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const queryClient = useQueryClient();
+  // placeholderData: κράτα τα προηγούμενα entries ορατά όσο τρέχει refetch
+  // (π.χ. μετά από μετάβαση), αντί να δείξει άδεια λίστα για μια στιγμή.
+  const entriesQuery = useQuery({
+    queryKey: ["entries"],
+    queryFn: getEntries,
+    placeholderData: (prev) => prev,
+  });
+  const entries = entriesQuery.data || [];
+  // isFetching (όχι isPending): true σε ΚΑΘΕ φόρτωση, αρχική ΚΑΙ μετά από
+  // refresh() μετά από ενέργεια — ίδια σημασιολογία με το παλιό setLoading.
+  const loading = entriesQuery.isFetching;
   const [busy, setBusy] = useState(false);
 
   // Ρητή αναφορά στο συγκεκριμένο όχημα (entry_id). ΔΕΝ υπάρχει global
@@ -224,17 +235,23 @@ function AuthenticatedApp({ workshop, onLogout, onWorkshopUpdated }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [devMode]);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await getEntries();
-      setEntries(Array.isArray(data) ? data : []);
-    } catch (err) {
-      notify("error", err.message);
-    } finally {
-      setLoading(false);
+  // Ίδιο όνομα/interface με πριν (async, καμία παράμετρος) ώστε τα 6 σημεία
+  // που καλούν refresh() μετά από μια ενέργεια (create/service/exit/
+  // correlate/cancel) να μη χρειάζονται καμία αλλαγή.
+  const refresh = useCallback(
+    () => queryClient.invalidateQueries({ queryKey: ["entries"] }),
+    [queryClient]
+  );
+
+  // Το invalidateQueries δεν κάνει throw σε σφάλμα του queryFn (ίδια
+  // συμπεριφορά ανεξάρτητα ΠΟΙΟ κάλεσε το refresh) — γι' αυτό το σφάλμα
+  // φαίνεται εδώ, στο query state, όχι σε try/catch γύρω από το refresh().
+  useEffect(() => {
+    if (entriesQuery.error) {
+      notify("error", entriesQuery.error.message);
     }
-  }, [notify]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entriesQuery.error]);
 
   const refreshSettings = useCallback(async () => {
     try {
@@ -245,7 +262,7 @@ function AuthenticatedApp({ workshop, onLogout, onWorkshopUpdated }) {
     }
   }, []);
 
-  // Έλεγχος backend + αρχική φόρτωση
+  // Έλεγχος backend (η αρχική φόρτωση των entries γίνεται από το useQuery)
   useEffect(() => {
     (async () => {
       try {
@@ -255,9 +272,8 @@ function AuthenticatedApp({ workshop, onLogout, onWorkshopUpdated }) {
         setHealth("down");
       }
     })();
-    refresh();
     refreshSettings();
-  }, [refresh, refreshSettings]);
+  }, [refreshSettings]);
 
   // ---- 1ος Χρόνος ----
   async function handleCreateEntry(plate, extra = {}) {
