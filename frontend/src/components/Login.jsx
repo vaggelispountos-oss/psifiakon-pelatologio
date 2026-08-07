@@ -47,7 +47,7 @@ export default function Login({ onAuthenticated }) {
         mode === "login"
           ? await login({ email, password })
           : await register({ name, email, password, businessType, termsAccepted });
-      onAuthenticated(data.workshop);
+      onAuthenticated(data.workshop, data.actor);
     } catch (err) {
       setError(err.message);
     } finally {

@@ -132,7 +132,7 @@ function BusinessTypeForm({ workshop, onWorkshopUpdated }) {
   );
 }
 
-export default function AccountPrivacy({ onLogout, workshop, onWorkshopUpdated }) {
+export default function AccountPrivacy({ onLogout, workshop, onWorkshopUpdated, isOwner = true }) {
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState("");
 
@@ -216,6 +216,7 @@ export default function AccountPrivacy({ onLogout, workshop, onWorkshopUpdated }
         {exportError && <div className="alert alert-error" style={{ marginTop: "8px" }}>{exportError}</div>}
       </div>
 
+      {isOwner ? (
       <div className="alert alert-error">
         <b>Διαγραφή λογαριασμού.</b> Οριστική διαγραφή του λογαριασμού και
         ΟΛΩΝ των δεδομένων σου (πελάτες, εγγραφές πελατολογίου, ρυθμίσεις).
@@ -280,6 +281,11 @@ export default function AccountPrivacy({ onLogout, workshop, onWorkshopUpdated }
           </form>
         )}
       </div>
+      ) : (
+        <div className="alert alert-info">
+          Μόνο ο ιδιοκτήτης του λογαριασμού μπορεί να τον διαγράψει.
+        </div>
+      )}
     </div>
   );
 }

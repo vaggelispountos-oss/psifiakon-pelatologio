@@ -19,6 +19,10 @@ const API_URL = (import.meta.env && import.meta.env.VITE_API_URL) || "";
 const TOKEN_KEY = "dcl_access_token";
 const REFRESH_TOKEN_KEY = "dcl_refresh_token";
 const WORKSHOP_KEY = "dcl_workshop";
+// {type: "owner"|"employee", id, name, email} — ΠΟΙΟΣ ΣΥΓΚΕΚΡΙΜΕΝΑ συνδέθηκε
+// (δες backend auth._issue_tokens). Ξεχωριστό από WORKSHOP_KEY: το workshop
+// είναι πάντα τα στοιχεία της επιχείρησης, το actor είναι το πρόσωπο.
+const ACTOR_KEY = "dcl_actor";
 
 let onUnauthorized = null;
 /** App.jsx καλεί αυτό μία φορά ώστε να ξέρει η api.js πώς να κάνει logout σε 401. */
@@ -34,16 +38,18 @@ function getRefreshToken() {
   return localStorage.getItem(REFRESH_TOKEN_KEY);
 }
 
-function setSession(accessToken, workshop, refreshToken) {
+function setSession(accessToken, workshop, refreshToken, actor) {
   localStorage.setItem(TOKEN_KEY, accessToken);
   if (refreshToken) localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
   if (workshop) localStorage.setItem(WORKSHOP_KEY, JSON.stringify(workshop));
+  if (actor) localStorage.setItem(ACTOR_KEY, JSON.stringify(actor));
 }
 
 export function clearSession() {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(REFRESH_TOKEN_KEY);
   localStorage.removeItem(WORKSHOP_KEY);
+  localStorage.removeItem(ACTOR_KEY);
 }
 
 // Το access token λήγει κάθε 60 λεπτά (JWT_ACCESS_TOKEN_EXPIRES_MIN). Πριν
@@ -89,6 +95,16 @@ export function getStoredWorkshop() {
  * (π.χ. businessType) — ώστε η επόμενη φόρτωση να δείχνει τη σωστή ροή. */
 export function setStoredWorkshop(workshop) {
   localStorage.setItem(WORKSHOP_KEY, JSON.stringify(workshop));
+}
+
+export function getStoredActor() {
+  const raw = localStorage.getItem(ACTOR_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -159,7 +175,7 @@ export async function register({ name, email, password, businessType, termsAccep
     body: { name, email, password, businessType, termsAccepted },
     skipAuth: true,
   });
-  setSession(data.accessToken, data.workshop, data.refreshToken);
+  setSession(data.accessToken, data.workshop, data.refreshToken, data.actor);
   return data;
 }
 
@@ -169,12 +185,36 @@ export async function login({ email, password }) {
     body: { email, password },
     skipAuth: true,
   });
-  setSession(data.accessToken, data.workshop, data.refreshToken);
+  setSession(data.accessToken, data.workshop, data.refreshToken, data.actor);
   return data;
 }
 
 export function logout() {
   clearSession();
+}
+
+// ---- Υπάλληλοι (μόνο owner μπορεί να δημιουργήσει/επεξεργαστεί/σβήσει —
+// δες backend auth.require_owner) ----
+export function getEmployees() {
+  return request("/api/employees");
+}
+
+export function createEmployee({ name, email, password }) {
+  return request("/api/employees", {
+    method: "POST",
+    body: { name, email, password },
+  });
+}
+
+export function updateEmployee(id, data) {
+  return request(`/api/employees/${id}`, {
+    method: "PATCH",
+    body: data,
+  });
+}
+
+export function deleteEmployee(id) {
+  return request(`/api/employees/${id}`, { method: "DELETE" });
 }
 
 export function forgotPassword(email) {

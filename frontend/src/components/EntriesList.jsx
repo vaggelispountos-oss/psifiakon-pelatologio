@@ -303,6 +303,12 @@ export default function EntriesList({
                     </span>
                   )}
                   <span className="mono">{e.idDcl || "—"}</span>
+                  {/* Ορατό ΜΟΝΟ αν υπάρχει υπάλληλος-δημιουργός (δες
+                      backend models.DclEntry.createdByName) — άδειο για
+                      συνεργεία χωρίς υπαλλήλους, όχι θόρυβος. */}
+                  {e.createdByName && (
+                    <span className="muted small">👤 {e.createdByName}</span>
+                  )}
                 </div>
                 <div className="entry-recon">{reconLine(e)}</div>
               </div>

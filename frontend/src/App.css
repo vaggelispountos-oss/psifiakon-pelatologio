@@ -1205,6 +1205,47 @@ textarea.input {
   flex-direction: column;
   gap: 6px;
 }
+
+/* Υπάλληλοι (Ρυθμίσεις -> Υπάλληλοι) */
+.employees-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 10px 0;
+}
+.employee-row {
+  padding: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.employee-row-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.employee-row-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.employee-reset-form {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.employee-reset-form .input {
+  flex: 1;
+  min-width: 200px;
+}
+.employee-create-form {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
 .badge {
   color: #fff;
   padding: 2px 8px;

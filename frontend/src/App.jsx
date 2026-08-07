@@ -15,6 +15,7 @@ import {
   getEntries,
   getHealth,
   getSettings,
+  getStoredActor,
   getStoredWorkshop,
   getToken,
   logout,
@@ -111,11 +112,19 @@ function useSecretDevMode() {
 
 export default function App() {
   const [workshop, setWorkshop] = useState(() => getStoredWorkshop());
+  // Ποιος ΣΥΓΚΕΚΡΙΜΕΝΑ συνδέθηκε — owner ή ένας συγκεκριμένος υπάλληλος
+  // (δες services/api.getStoredActor). Ξεχωριστό από το workshop (πάντα η
+  // επιχείρηση) — χρησιμοποιείται στο topbar ΚΑΙ για να κρύβεται η
+  // διαχείριση υπαλλήλων από όποιον δεν είναι owner (δες SettingsPanel).
+  const [actor, setActor] = useState(() => getStoredActor());
   const [authChecked, setAuthChecked] = useState(false);
 
   useEffect(() => {
     // Σε 401 από οποιοδήποτε request (π.χ. έληξε το token), γύρνα στο login.
-    setUnauthorizedHandler(() => setWorkshop(null));
+    setUnauthorizedHandler(() => {
+      setWorkshop(null);
+      setActor(null);
+    });
     setAuthChecked(true);
   }, []);
 
@@ -134,15 +143,24 @@ export default function App() {
   }
 
   if (!isAuthenticated) {
-    return <Login onAuthenticated={(w) => setWorkshop(w)} />;
+    return (
+      <Login
+        onAuthenticated={(w, a) => {
+          setWorkshop(w);
+          setActor(a);
+        }}
+      />
+    );
   }
 
   return (
     <AuthenticatedApp
       workshop={workshop}
+      actor={actor}
       onLogout={() => {
         logout();
         setWorkshop(null);
+        setActor(null);
       }}
       onWorkshopUpdated={(w) => {
         setStoredWorkshop(w);
@@ -152,7 +170,7 @@ export default function App() {
   );
 }
 
-function AuthenticatedApp({ workshop, onLogout, onWorkshopUpdated }) {
+function AuthenticatedApp({ workshop, actor, onLogout, onWorkshopUpdated }) {
   const isRental = workshop?.businessType === "rental";
   const [tab, setTab] = useState("flow");
   // Ποια εσωτερική προβολή του tab «Αρχείο» είναι ενεργή — ελεγχόμενο εδώ
@@ -527,8 +545,8 @@ function AuthenticatedApp({ workshop, onLogout, onWorkshopUpdated }) {
               ● Offline
             </div>
           )}
-          <span className="muted" title={workshop?.email}>
-            {workshop?.name}
+          <span className="muted" title={actor?.email || workshop?.email}>
+            {actor?.type === "employee" ? actor.name : workshop?.name}
           </span>
           <button className="btn btn-ghost btn-sm" onClick={onLogout}>
             Αποσύνδεση
@@ -594,6 +612,7 @@ function AuthenticatedApp({ workshop, onLogout, onWorkshopUpdated }) {
             onLogout={onLogout}
             workshop={workshop}
             onWorkshopUpdated={onWorkshopUpdated}
+            isOwner={actor?.type !== "employee"}
           />
         )}
       </main>

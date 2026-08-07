@@ -20,6 +20,7 @@ import HelpKnowledgeBase from "./HelpKnowledgeBase";
 import ContactSupport from "./ContactSupport";
 import InstallAppPrompt from "./InstallAppPrompt";
 import AccountPrivacy from "./AccountPrivacy";
+import EmployeesPanel from "./EmployeesPanel";
 
 export default function SettingsPanel({ onSaved }) {
   const [username, setUsername] = useState("");
@@ -361,7 +362,13 @@ function OcrEngineSettings() {
 // Accordion με ΟΛΗ την οθόνη Ρυθμίσεων — μόνο μία ενότητα ανοιχτή τη φορά
 // ώστε να μην πιάνουν πολύ χώρο οι κάρτες. Σειρά (ζητήθηκε ρητά):
 // Οδηγός Σφαλμάτων πάνω-πάνω, Ρυθμίσεις ΑΑΔΕ κάτω-κάτω.
-export function SettingsAccordion({ onSaved, onLogout, workshop, onWorkshopUpdated }) {
+export function SettingsAccordion({
+  onSaved,
+  onLogout,
+  workshop,
+  onWorkshopUpdated,
+  isOwner = true,
+}) {
   return (
     <Accordion
       defaultOpen="kb"
@@ -376,9 +383,23 @@ export function SettingsAccordion({ onSaved, onLogout, workshop, onWorkshopUpdat
               onLogout={onLogout}
               workshop={workshop}
               onWorkshopUpdated={onWorkshopUpdated}
+              isOwner={isOwner}
             />
           ),
         },
+        // Μόνο ο owner διαχειρίζεται υπαλλήλους (δες backend
+        // auth.require_owner) — κρύβεται εντελώς από μη-owners, όχι μόνο
+        // απενεργοποιημένο, ώστε να μη δείχνει μια οθόνη που έτσι κι αλλιώς
+        // θα απαντούσε 403 σε κάθε ενέργεια.
+        ...(isOwner
+          ? [
+              {
+                id: "employees",
+                title: "Υπάλληλοι",
+                render: () => <EmployeesPanel />,
+              },
+            ]
+          : []),
         {
           id: "install",
           title: "Εγκατάσταση στο κινητό",

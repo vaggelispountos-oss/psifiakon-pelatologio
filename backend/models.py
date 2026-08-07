@@ -86,6 +86,57 @@ class Workshop(db.Model):
         }
 
 
+class Employee(db.Model):
+    """
+    Υπάλληλος ενός συνεργείου — δικό του login (email/password), βλέπει ΤΑ
+    ΙΔΙΑ δεδομένα με τον owner (ίδιο workshop_id filtering παντού, δες
+    auth.require_auth), αλλά ΔΕΝ μπορεί να διαχειριστεί άλλους υπαλλήλους
+    ή να διαγράψει τον λογαριασμό (δες auth.require_owner).
+
+    Ο σκοπός είναι κυρίως audit trail: ΠΟΙΟΣ έκανε ΤΙ (δες AadeLog.
+    actor_employee_id, DclEntry.created_by_employee_id) — πριν από αυτό,
+    ένα συνεργείο με πολλούς υπαλλήλους μοιραζόταν ΕΝΑ login, οπότε καμία
+    ενέργεια δεν μπορούσε να αποδοθεί σε συγκεκριμένο άτομο.
+    """
+
+    __tablename__ = "employees"
+
+    id = db.Column(db.Integer, primary_key=True)
+    workshop_id = db.Column(
+        db.Integer, db.ForeignKey("workshops.id"), nullable=False, index=True
+    )
+    name = db.Column(db.String(255), nullable=False)
+    # Μοναδικό ΣΥΝΟΛΙΚΑ (όχι μόνο ανά workshop) — το login γίνεται με email
+    # χωρίς επιλογή workshop, οπότε πρέπει να ξέρουμε ΑΠΟ ΜΟΝΟ ΤΟΥ ΠΟΙΟΝ
+    # πίνακα (Workshop ή Employee) να ψάξουμε (δες auth.login). Ελέγχεται
+    # ρητά ΚΑΙ έναντι του Workshop.email στο create_employee (η DB unique
+    # constraint εδώ δεν το βλέπει, είναι διαφορετικός πίνακας).
+    email = db.Column(db.String(255), unique=True, nullable=False)
+    password_hash = db.Column(db.String(255), nullable=False)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    # Ίδιος μηχανισμός ανάκλησης με το Workshop.token_epoch, αλλά ΞΕΧΩΡΙΣΤΟ
+    # μετρητή — η αλλαγή κωδικού ενός υπαλλήλου ΔΕΝ πρέπει να αποσυνδέσει
+    # τον owner ή τους υπόλοιπους υπαλλήλους, και αντίστροφα.
+    token_epoch = db.Column(db.Integer, default=0, nullable=False)
+    created_at = db.Column(db.DateTime, default=utcnow)
+
+    def set_password(self, raw_password):
+        self.password_hash = generate_password_hash(raw_password)
+        self.token_epoch = (self.token_epoch or 0) + 1
+
+    def check_password(self, raw_password):
+        return check_password_hash(self.password_hash, raw_password)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "email": self.email,
+            "isActive": self.is_active,
+            "createdAt": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 class Customer(db.Model):
     """Πελάτης / όχημα του συνεργείου."""
 
@@ -175,6 +226,17 @@ class DclEntry(db.Model):
     workshop_id = db.Column(
         db.Integer, db.ForeignKey("workshops.id"), nullable=False, index=True
     )
+    # Ποιος υπάλληλος δημιούργησε την εγγραφή — nullable: None σημαίνει
+    # owner (δεν έχει δικό του Employee row) Ή έγινε πριν από αυτή τη
+    # στήλη (δες migration 0005). Καθαρά audit trail — δεν επηρεάζει
+    # καμία λογική πρόσβασης (κάθε υπάλληλος βλέπει ΟΛΑ τα entries του
+    # workshop, όχι μόνο τα δικά του).
+    created_by_employee_id = db.Column(
+        db.Integer,
+        db.ForeignKey("employees.id", ondelete="SET NULL"),
+        nullable=True
+    )
+    created_by_employee = db.relationship("Employee")
 
     # Μοναδικός Αριθμός Εγγραφής που επιστρέφει η ΑΑΔΕ στον 1ο Χρόνο
     id_dcl = db.Column(db.String(50), nullable=True)
@@ -353,6 +415,14 @@ class DclEntry(db.Model):
             "comments": self.comments,
             "createdAt": self.created_at.isoformat() if self.created_at else None,
             "updatedAt": self.updated_at.isoformat() if self.updated_at else None,
+            # None = owner (καμία Employee row) — δες models.Employee. Ελέγχει
+            # ΤΟ ΙΔΙΟ το relationship object (όχι μόνο το _id): ένα ορφανό FK
+            # (π.χ. Employee διαγράφηκε εκτός του auth.delete_employee, που
+            # κανονικά καθαρίζει σε NULL) δεν πρέπει να ρίχνει 500 εδώ.
+            "createdByEmployeeId": self.created_by_employee_id,
+            "createdByName": self.created_by_employee.name
+            if self.created_by_employee
+            else None,
         }
         if include_logs:
             data["logs"] = [log.to_dict() for log in self.logs]
@@ -520,6 +590,13 @@ class AadeLog(db.Model):
     workshop_id = db.Column(
         db.Integer, db.ForeignKey("workshops.id"), nullable=True, index=True
     )
+    # Ποιος υπάλληλος έκανε ΑΥΤΗ ΤΗ ΣΥΓΚΕΚΡΙΜΕΝΗ κλήση προς την ΑΑΔΕ — None
+    # σημαίνει owner (δεν έχει Employee row) Ή έγινε πριν από τη στήλη.
+    actor_employee_id = db.Column(
+        db.Integer,
+        db.ForeignKey("employees.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     # nullable: επιτρέπει system-level logs χωρίς εγγραφή (π.χ. test-connection)
     dcl_entry_id = db.Column(
         db.Integer, db.ForeignKey("dcl_entries.id"), nullable=True
@@ -531,6 +608,8 @@ class AadeLog(db.Model):
     success = db.Column(db.Boolean, default=True, nullable=False)
     created_at = db.Column(db.DateTime, default=utcnow)
 
+    actor_employee = db.relationship("Employee")
+
     def to_dict(self):
         return {
             "id": self.id,
@@ -540,6 +619,8 @@ class AadeLog(db.Model):
             "responseJson": self.response_json,
             "success": self.success,
             "createdAt": self.created_at.isoformat() if self.created_at else None,
+            "actorEmployeeId": self.actor_employee_id,
+            "actorName": self.actor_employee.name if self.actor_employee else None,
         }
 
 

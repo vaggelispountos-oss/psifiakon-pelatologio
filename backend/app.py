@@ -25,7 +25,7 @@ from sqlalchemy import case, func
 from sqlalchemy.orm import selectinload
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from auth import init_auth, limiter, require_auth, workshop_key
+from auth import init_auth, limiter, require_auth, require_owner, workshop_key
 from config import Config, validate_production_config
 from models import (
     AadeLog,
@@ -126,6 +126,7 @@ def _log_aade(entry_id, method, request_payload, response_payload, success):
     """
     log = AadeLog(
         workshop_id=g.workshop_id,
+        actor_employee_id=g.actor_id,
         dcl_entry_id=entry_id,
         method=method,
         request_json=json.dumps(request_payload, ensure_ascii=False),
@@ -869,6 +870,7 @@ def register_routes(app):
 
     @app.route("/api/account", methods=["DELETE"])
     @require_auth
+    @require_owner
     def delete_account():
         data = request.get_json(silent=True) or {}
         password = data.get("password") or ""
@@ -1037,6 +1039,7 @@ def register_routes(app):
         # Δημιουργία της εγγραφής DCL (τοπικά, χωρίς idDcl ακόμη)
         entry = DclEntry(
             workshop_id=g.workshop_id,
+            created_by_employee_id=g.actor_id,
             plate=plate,
             branch=int(branch),
             client_service_type=workshop.client_service_type,
