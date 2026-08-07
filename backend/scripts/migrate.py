@@ -25,8 +25,28 @@ deploy, μετά γύρνα το πίσω σε `alembic upgrade head`. Δουλ�
   - Αν η βάση έχει ΗΔΗ πίνακες αλλά ΚΑΝΕΝΑ alembic_version (legacy/
     pre-Alembic state) -> stamp στο baseline ΠΡΩΤΑ, μετά upgrade.
   - Αλλιώς (κενή βάση, ή ήδη Alembic-managed) -> απλό upgrade head.
-Ασφαλές να τρέχει σε ΚΑΘΕ deploy/boot — ιδεμπoτεντ και στις τρεις
-περιπτώσεις.
+
+⚠️ ΣΥΝΕΧΕΙΑ ΤΟΥ ΙΣΤΟΡΙΚΟΥ (μετά το πρώτο πραγματικό migration πέρα από το
+baseline): αποδείχθηκε ότι το "stamp στο 0001" ΔΕΝ αρκεί όταν η πραγματική
+production βάση ΔΕΝ ταιριάζει ΑΚΡΙΒΩΣ με ό,τι περιγράφει το migration 0001
+— π.χ. το dcl_entries.aade_state προστέθηκε στο models.py ΠΡΙΝ φτιαχτεί το
+baseline migration, οπότε το 0001 "υπόσχεται" αυτή τη στήλη, αλλά η
+ΠΑΛΙΑ, ήδη υπάρχουσα production βάση (φτιαγμένη πριν υπάρξει καν αυτή η
+στήλη στον κώδικα) δεν την είχε ποτέ. Το stamp είπε στο Alembic "είσαι
+ήδη εδώ" χωρίς να το επαληθεύσει — αποτέλεσμα: UndefinedColumn σε runtime,
+ΠΟΛΥ αργότερα, σε endpoint που δεν έχει καμία σχέση με migrations.
+
+Γι' αυτό, ΠΡΙΝ από οποιαδήποτε απόφαση stamp/upgrade, αυτό το script κάνει
+ΠΡΩΤΑ ένα ανεξάρτητο, μη-βασισμένο-στο-alembic_version πέρασμα: συγκρίνει
+ΚΑΘΕ στήλη που δηλώνει το models.py με ό,τι ΠΡΑΓΜΑΤΙΚΑ υπάρχει στη βάση
+(ΟΧΙ βάσει του τι λέει το alembic_version — βάσει introspection), και
+προσθέτει ΜΟΝΟ nullable στήλες που λείπουν (ίδιο, ασφαλές μοτίβο με το
+παλιό _add_missing_columns — ΔΕΝ αγγίζει NOT NULL στήλες, αυτές θέλουν
+πραγματικό migration με backfill, όπως το 0002/token_epoch). Αυτό κάνει
+το όλο pipeline ανθεκτικό σε ΟΠΟΙΑΔΗΠΟΤΕ ιστορική απόκλιση, όχι μόνο στα
+δύο σενάρια (κενή/legacy) που είχαν προβλεφθεί αρχικά.
+
+Ασφαλές να τρέχει σε ΚΑΘΕ deploy/boot — πλήρως ιδεμπότεντ.
 --------------------------------------------------------------------
 """
 import os
@@ -36,7 +56,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from alembic import command
 from alembic.config import Config as AlembicConfig
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, text
 
 from config import BASE_DIR, Config as AppConfig
 
@@ -46,12 +66,50 @@ _BASELINE_PROBE_TABLE = "workshops"
 _BASELINE_REVISION = "0001"
 
 
+def _sync_missing_nullable_columns(engine):
+    """
+    Introspection-based repair: για ΚΑΘΕ πίνακα/στήλη που δηλώνει το
+    models.py, αν λείπει από την ΠΡΑΓΜΑΤΙΚΗ βάση (ανεξάρτητα από το τι
+    πιστεύει το alembic_version), πρόσθεσέ την — ΜΟΝΟ αν είναι nullable
+    (χωρίς default value δεν μπορούμε να την προσθέσουμε με ασφάλεια σε
+    πίνακα με υπάρχουσες γραμμές· αυτές θέλουν πραγματικό migration).
+    """
+    # Εισαγωγή εδώ (όχι στην κορυφή του αρχείου) ώστε το `models` module να
+    # φορτώνεται με το ΣΩΣΤΟ sys.path (μπήκε λίγες γραμμές πιο πάνω).
+    from models import db as _db
+
+    inspector = inspect(engine)
+    with engine.begin() as conn:
+        for table in _db.metadata.sorted_tables:
+            if not inspector.has_table(table.name):
+                continue  # νέος πίνακας -> θα τον φτιάξει το alembic upgrade
+            existing = {c["name"] for c in inspector.get_columns(table.name)}
+            for column in table.columns:
+                if column.name in existing:
+                    continue
+                if not column.nullable:
+                    print(
+                        f"[migrate] ΠΡΟΣΟΧΗ: λείπει η NOT NULL στήλη "
+                        f"'{table.name}.{column.name}' — χρειάζεται πραγματικό "
+                        f"Alembic migration με backfill (δεν προστέθηκε αυτόματα)."
+                    )
+                    continue
+                col_type = column.type.compile(engine.dialect)
+                conn.execute(
+                    text(
+                        f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {col_type}'
+                    )
+                )
+                print(f"[migrate] Πρόσθεσα στήλη που έλειπε: {table.name}.{column.name}")
+
+
 def upgrade_to_head():
     """
     Reusable πυρήνας — καλείται από εδώ (CLI/buildCommand), από το
     `python app.py` dev bootstrap, ΚΑΙ από τα tests (conftest.py). ΜΙΑ
-    υλοποίηση της λογικής "stamp αν χρειάζεται, μετά upgrade", ώστε να μην
-    υπάρχουν τρεις σημεία που μπορούν να ξεσυγχρονιστούν.
+    υλοποίηση της λογικής "sync ό,τι λείπει, stamp αν χρειάζεται, μετά
+    upgrade", ώστε να μην υπάρχουν τρία σημεία που μπορούν να
+    ξεσυγχρονιστούν.
     """
     alembic_cfg = AlembicConfig(os.path.join(BASE_DIR, "alembic.ini"))
 
@@ -60,6 +118,9 @@ def upgrade_to_head():
         inspector = inspect(engine)
         has_alembic_version = inspector.has_table("alembic_version")
         has_app_tables = inspector.has_table(_BASELINE_PROBE_TABLE)
+
+        if has_app_tables:
+            _sync_missing_nullable_columns(engine)
     finally:
         engine.dispose()
 
