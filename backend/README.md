@@ -41,11 +41,13 @@ cp .env.example .env            # προαιρετικό — δουλεύει κ
 python app.py
 ```
 
-Το SQLite DB (`dcl.db`) δημιουργείται **αυτόματα** στο πρώτο τρέξιμο.
-Ο server ακούει στο `http://localhost:5001` (ΟΧΙ 5000 — το κρατάει το
-AirPlay στο macOS). Σε production (`FLASK_ENV=production`), το backend
-σηκώνεται με `validate_production_config()` που **σκάει νωρίς** αν λείπουν
-κρίσιμα μυστικά (`JWT_SECRET_KEY`, `ENCRYPTION_KEY`) — δες `config.py`.
+Το SQLite DB (`instance/dcl.db`) δημιουργείται **αυτόματα** στο πρώτο
+τρέξιμο — το `python app.py` εφαρμόζει τα Alembic migrations πριν ξεκινήσει
+τον server (δες «Migrations» παρακάτω). Ο server ακούει στο
+`http://localhost:5001` (ΟΧΙ 5000 — το κρατάει το AirPlay στο macOS). Σε
+production (`FLASK_ENV=production`), το backend σηκώνεται με
+`validate_production_config()` που **σκάει νωρίς** αν λείπουν κρίσιμα
+μυστικά (`JWT_SECRET_KEY`, `ENCRYPTION_KEY`) — δες `config.py`.
 
 ## Auth
 
@@ -101,10 +103,38 @@ backend/
 ├── mock_aade.py / real_aade.py  # Δύο υλοποιήσεις του ίδιου ΑΑΔΕ interface
 ├── migrate_encrypt_settings.py  # One-off migration: plaintext -> encrypted keys (δες παρακάτω)
 ├── config.py                    # Ρυθμίσεις από .env + validate_production_config()
+├── alembic.ini / migrations/    # Σχήμα βάσης — δες «Migrations» παρακάτω
 ├── scripts/backup_db.sh         # pg_dump backup (τρέχει από .github/workflows/backup.yml)
 ├── requirements.txt / requirements-dev.txt
 └── tests/
 ```
+
+## Migrations (Alembic)
+
+Το σχήμα της βάσης είναι **αποκλειστική ευθύνη του Alembic** — το `app.py`
+δεν κάνει καμία αλλαγή σχήματος στο boot (`db.create_all()`/χειροκίνητο
+`ALTER TABLE` έχουν αφαιρεθεί: με πάνω από έναν gunicorn worker, δύο
+processes που τρέχουν το ίδιο `ALTER TABLE` ταυτόχρονα στο boot σκάνε με
+`DuplicateColumn` σε Postgres).
+
+**Τοπικά (`python app.py`)**: τα migrations εφαρμόζονται **αυτόματα** πριν
+ξεκινήσει ο server — δεν χρειάζεται χειροκίνητο βήμα. Αν προτιμάς να το
+κάνεις ρητά (π.χ. χωρίς να ανοίξεις τον server):
+```bash
+alembic upgrade head
+```
+
+**Production (Render)**: το `render.yaml` τρέχει `alembic upgrade head` ως
+μέρος του `buildCommand` — **μία φορά ανά deploy**, πριν ξεκινήσουν οι
+gunicorn workers.
+
+**Προσθήκη νέου πεδίου/πίνακα**: μετά από αλλαγή σε `models.py`,
+```bash
+alembic revision --autogenerate -m "περιγραφή της αλλαγής"
+```
+Έλεγξε ΠΑΝΤΑ το παραγόμενο αρχείο στο `migrations/versions/` πριν το
+commit — το autogenerate δεν πιάνει τα πάντα (π.χ. rename στήλης το βλέπει
+ως drop+add, table/column comments, κάποιοι server-side defaults).
 
 ## Migration: κρυπτογράφηση AADE keys σε production
 
@@ -134,7 +164,14 @@ Idempotent (μπορείς να το ξανατρέξεις χωρίς βλάβ�
 - **Δύο είδη σφαλμάτων**: τεχνικά (HTTP status — 401 = λάθος κωδικοί) και
   επιχειρησιακά (HTTP 200 **αλλά** `statusCode != Success` μέσα στο XML).
   Ελέγχεται **πάντα** το `statusCode`.
-- **Timeout + retry** (2 προσπάθειες) για δικτυακά σφάλματα.
+- **Retry ΜΟΝΟ όταν είναι ασφαλές**: τα POST της ΑΑΔΕ ΔΕΝ είναι idempotent
+  (κάθε SendClient δημιουργεί ΝΕΑ εγγραφή) — retry σε read timeout θα
+  μπορούσε να διπλασιάσει μια εγγραφή που στην πραγματικότητα πέτυχε. Γι'
+  αυτό γίνεται retry ΜΟΝΟ σε `ConnectionError` (το αίτημα δεν έφυγε ποτέ).
+  Σε read timeout / HTTP 5xx / μη αναγνώσιμη απάντηση, η εγγραφή σημαδεύεται
+  `aade_state="indeterminate"` και η «Επαναποστολή» μπλοκάρεται μέχρι να
+  γίνει έλεγχος (`POST /api/dcl/entries/<id>/verify`) — δες `app.py`
+  (`_post_xml`, `resend_entry`, `verify_entry`).
 
 ### Απαραίτητα specs
 Κατέβασε (μία φορά) τα επίσημα XSD/παραδείγματα στο `aade_specs/`:

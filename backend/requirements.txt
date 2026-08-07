@@ -16,3 +16,6 @@ lxml>=5.0
 requests>=2.31
 # Κρυπτογράφηση aade_subscription_key στη βάση (crypto.py)
 cryptography>=42.0
+# Migrations βάσης (αντικαθιστά το χειροκίνητο _add_missing_columns) — δες
+# migrations/README.md για το γιατί.
+alembic>=1.13

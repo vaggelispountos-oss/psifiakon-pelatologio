@@ -101,6 +101,7 @@ class RealAadeService:
         spec_dir=None,
         timeout=30,
         retries=2,
+        connect_timeout=10,
     ):
         self.username = username
         self.subscription_key = subscription_key
@@ -109,6 +110,7 @@ class RealAadeService:
         self.base_url = (base_url or "https://mydataapidev.aade.gr/DCL/").rstrip("/")
         self.spec_dir = spec_dir or DEFAULT_SPEC_DIR
         self.timeout = timeout
+        self.connect_timeout = connect_timeout
         self.retries = max(1, int(retries))
         self._schema_cache = {}
 
@@ -127,6 +129,9 @@ class RealAadeService:
         """
         Χειρισμός ΤΕΧΝΙΚΩΝ σφαλμάτων (HTTP status). Επιστρέφει είτε
         {"error": ...} (τεχνικό), είτε το normalized parse του ResponseDoc.
+
+        Τα 5xx σημαδεύονται indeterminate: η ΑΑΔΕ ΠΗΡΕ το αίτημα και μπορεί
+        να το επεξεργάστηκε πριν σκάσει — δες _post_xml.
         """
         if resp.status_code == 401:
             return {"error": "Λάθος κωδικοί ΑΑΔΕ (401) — έλεγξε το Όνομα "
@@ -134,13 +139,39 @@ class RealAadeService:
         if resp.status_code == 400:
             return {"error": "Σφάλμα αιτήματος προς ΑΑΔΕ (400): %s"
                              % (resp.text or "")[:300]}
+        if resp.status_code >= 500:
+            return {
+                "error": "Τεχνικό σφάλμα ΑΑΔΕ (HTTP %d). Το αίτημα έφτασε στην "
+                         "ΑΑΔΕ — μπορεί να καταχωρήθηκε παρά το σφάλμα."
+                         % resp.status_code,
+                "indeterminate": True,
+            }
         if resp.status_code != 200:
             return {"error": "Τεχνικό σφάλμα ΑΑΔΕ (HTTP %d). Δοκίμασε ξανά σε λίγο· αν επιμένει, επικοινώνησε με την υποστήριξη." % resp.status_code}
         # HTTP 200 -> τα ΕΠΙΧΕΙΡΗΣΙΑΚΑ σφάλματα κρύβονται ΜΕΣΑ στο XML
         return self._parse_response(resp.content)
 
     def _post_xml(self, path, xml_bytes, params=None):
-        """Κοινή POST κλήση με retries για δικτυακά σφάλματα."""
+        """
+        Κοινή POST κλήση.
+
+        ⚠️ ΤΑ POST ΤΗΣ ΑΑΔΕ ΔΕΝ ΕΙΝΑΙ IDEMPOTENT: κάθε SendClient δημιουργεί
+        ΝΕΑ εγγραφή στο Ψηφιακό Πελατολόγιο (και κάθε UpdateClient/
+        ClientCorrelations νέα εγγραφή ενημέρωσης). Τυφλό retry σημαίνει
+        ΔΙΠΛΗ καταχώρηση — για προϊόν συμμόρφωσης αυτό είναι χειρότερο από
+        το σφάλμα, γιατί ο χρήστης δεν έχει τρόπο να το δει ή να το αναιρέσει.
+
+        Γι' αυτό ξεχωρίζουμε ΔΥΟ κατηγορίες δικτυακών σφαλμάτων:
+
+          • Το αίτημα ΔΕΝ έφυγε ποτέ (DNS, connection refused, connect
+            timeout) -> τίποτα δεν επεξεργάστηκε -> ΑΣΦΑΛΕΣ να ξαναστείλουμε.
+
+          • Το αίτημα ΕΦΥΓΕ αλλά δεν ήρθε απάντηση (read timeout, HTTP 5xx)
+            -> ΑΓΝΩΣΤΗ κατάσταση: η εγγραφή ΜΠΟΡΕΙ να υπάρχει ήδη στην ΑΑΔΕ.
+            ΠΟΤΕ retry. Επιστρέφουμε indeterminate=True ώστε ο caller
+            (app.py) να σημαδέψει την εγγραφή και να απαιτήσει έλεγχο με
+            RequestClients ΠΡΙΝ επιτρέψει επαναποστολή.
+        """
         url = "%s/%s" % (self.base_url, path)
         last_exc = None
         for _ in range(self.retries):
@@ -150,21 +181,44 @@ class RealAadeService:
                     data=xml_bytes,
                     params=params,
                     headers=self._headers(),
-                    timeout=self.timeout,
+                    # (connect, read): το connect timeout πρέπει να είναι μικρό
+                    # ώστε ένας μη προσβάσιμος server να αποτύχει ΓΡΗΓΟΡΑ και
+                    # ΑΣΦΑΛΩΣ (χωρίς να έχει σταλεί τίποτα), ενώ το read timeout
+                    # μένει γενναιόδωρο για την αργή επεξεργασία της ΑΑΔΕ.
+                    timeout=(self.connect_timeout, self.timeout),
                 )
                 return self._handle_http(resp)
-            except (requests.ConnectionError, requests.Timeout) as exc:
+            except requests.ReadTimeout as exc:
+                # ΣΤΑΛΘΗΚΕ. Δεν ξέρουμε αν εκτελέστηκε -> ΜΗΝ ξαναστείλεις.
+                return {
+                    "error": "Η ΑΑΔΕ δεν απάντησε εγκαίρως (%s). Το αίτημα "
+                             "μπορεί να καταχωρήθηκε — απαιτείται έλεγχος πριν "
+                             "ξανασταλεί, ώστε να μη δημιουργηθεί διπλή εγγραφή."
+                             % exc,
+                    "indeterminate": True,
+                }
+            except requests.ConnectionError as exc:
+                # Καλύπτει και το ConnectTimeout (υποκλάση). Η σύνδεση δεν
+                # ολοκληρώθηκε ποτέ -> η ΑΑΔΕ δεν είδε τίποτα -> retry OK.
                 last_exc = exc
                 continue
         return {"error": "Δικτυακό σφάλμα επικοινωνίας με ΑΑΔΕ: %s — έλεγξε τη σύνδεση internet και δοκίμασε ξανά." % last_exc}
 
     def _get(self, path, params=None):
+        """
+        Κοινή GET κλήση (RequestClients). Σε αντίθεση με το _post_xml, το GET
+        είναι idempotent — δεν αλλάζει τίποτα στην ΑΑΔΕ — άρα το retry είναι
+        πάντα ασφαλές, ακόμη και σε read timeout.
+        """
         url = "%s/%s" % (self.base_url, path)
         last_exc = None
         for _ in range(self.retries):
             try:
                 resp = requests.get(
-                    url, params=params, headers=self._headers(), timeout=self.timeout
+                    url,
+                    params=params,
+                    headers=self._headers(),
+                    timeout=(self.connect_timeout, self.timeout),
                 )
                 if resp.status_code == 401:
                     return {"error": "Λάθος κωδικοί ΑΑΔΕ (401)."}
@@ -217,15 +271,25 @@ class RealAadeService:
              "cancellationID": ..., "correlateId": ..., "errors": [...]}
         Σε αποτυχία parsing επιστρέφει {"error": ...}.
         """
+        # ⚠️ Εδώ φτάνουμε ΜΟΝΟ μετά από HTTP 200, δηλαδή η ΑΑΔΕ ΔΕΧΤΗΚΕ και
+        # επεξεργάστηκε το αίτημα. Αν δεν καταλαβαίνουμε την απάντησή της, η
+        # εγγραφή κατά πάσα πιθανότητα ΥΠΑΡΧΕΙ — indeterminate, όχι απλή
+        # αποτυχία, αλλιώς ο χρήστης θα ξαναστείλει και θα τη διπλασιάσει.
         try:
             root = etree.fromstring(content)
         except etree.XMLSyntaxError as exc:
-            return {"error": "Μη έγκυρο XML απάντησης από ΑΑΔΕ: %s" % exc}
+            return {
+                "error": "Μη έγκυρο XML απάντησης από ΑΑΔΕ: %s" % exc,
+                "indeterminate": True,
+            }
 
         # Βρες το πρώτο <response> (ανεξαρτήτως namespace)
         responses = [c for c in root.iter() if _localname(c.tag) == "response"]
         if not responses:
-            return {"error": "Η απάντηση ΑΑΔΕ δεν περιέχει στοιχείο <response>."}
+            return {
+                "error": "Η απάντηση ΑΑΔΕ δεν περιέχει στοιχείο <response>.",
+                "indeterminate": True,
+            }
 
         resp = responses[0]
         out = {"errors": []}

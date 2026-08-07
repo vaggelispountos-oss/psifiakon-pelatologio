@@ -5,5 +5,11 @@ __pycache__
 *.pyc
 venv
 *.db
+# Backups αρχείων βάσης (π.χ. backend/scripts/backup_db.sh) — το *.db
+# παραπάνω ΔΕΝ πιάνει "dcl.db.bak-20260807102119" (δεν τελειώνει σε .db).
+*.db.bak*
+# Flask instance folder — εκεί καταλήγει το τοπικό SQLite (π.χ.
+# backend/instance/dcl.db) όταν το DATABASE_URL είναι σχετικό path.
+instance/
 .DS_Store
 backups/

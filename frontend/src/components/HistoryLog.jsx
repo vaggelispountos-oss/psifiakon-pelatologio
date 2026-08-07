@@ -2,7 +2,7 @@
 // Ιστορικό — χρονολογική ροή εγγραφών με τους 4 Χρόνους τους.
 // Κλικ σε εγγραφή -> φόρτωση των AadeLogs (audit) από το backend.
 import { useState } from "react";
-import { getEntry, resendEntry } from "../services/api";
+import { getEntry, resendEntry, verifyEntry } from "../services/api";
 import {
   STATUS_LABELS,
   STATUS_LABELS_RENTAL,
@@ -40,6 +40,10 @@ export default function HistoryLog({ entries, loading, onRefresh }) {
   const [detailErr, setDetailErr] = useState("");
   const [resending, setResending] = useState(false);
   const [resendErr, setResendErr] = useState("");
+  // Μήνυμα αποτελέσματος από επαναποστολή/έλεγχο — σημαντικό να φαίνεται,
+  // γιατί το «δεν στάλθηκε ξανά, υπήρχε ήδη» είναι ΔΙΑΦΟΡΕΤΙΚΟ αποτέλεσμα
+  // από το «στάλθηκε», και ο χρήστης πρέπει να ξέρει ποιο από τα δύο έγινε.
+  const [actionMsg, setActionMsg] = useState("");
 
   async function toggle(id) {
     if (openId === id) {
@@ -51,6 +55,7 @@ export default function HistoryLog({ entries, loading, onRefresh }) {
     setDetail(null);
     setDetailErr("");
     setResendErr("");
+    setActionMsg("");
     try {
       const d = await getEntry(id);
       setDetail(d);
@@ -59,12 +64,16 @@ export default function HistoryLog({ entries, loading, onRefresh }) {
     }
   }
 
-  async function handleResend(id) {
+  /** Κοινή εκτέλεση για «Επαναποστολή» και «Έλεγχος στην ΑΑΔΕ» — ίδιος
+   *  χειρισμός κατάστασης/σφάλματος, διαφορετική κλήση. */
+  async function runAction(id, fn, messageKey) {
     setResending(true);
     setResendErr("");
+    setActionMsg("");
     try {
-      const updated = await resendEntry(id);
+      const updated = await fn(id);
       setDetail((prev) => (prev ? { ...prev, ...updated } : updated));
+      setActionMsg(updated[messageKey] || "");
       onRefresh();
     } catch (err) {
       setResendErr(err.message);
@@ -72,6 +81,9 @@ export default function HistoryLog({ entries, loading, onRefresh }) {
       setResending(false);
     }
   }
+
+  const handleResend = (id) => runAction(id, resendEntry, "resendMessage");
+  const handleVerify = (id) => runAction(id, verifyEntry, "verificationMessage");
 
   const sorted = [...entries].sort(
     (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
@@ -105,10 +117,22 @@ export default function HistoryLog({ entries, loading, onRefresh }) {
               <button className="history-head" onClick={() => toggle(e.id)}>
                 <span className="mono">{e.plate}</span>
                 <span className="muted">{s.text}</span>
-                {e.pendingAction && (
-                  <span className="badge badge-warn" title={PENDING_LABELS[e.pendingAction]}>
-                    ⏳ Εκκρεμεί επιβεβαίωση
+                {/* Η άγνωστη έκβαση δείχνεται ΞΕΧΩΡΙΣΤΑ (και όταν δεν υπάρχει
+                    pendingAction, π.χ. αποτυχημένη ακύρωση): απαιτεί άλλη
+                    ενέργεια από τον χρήστη — έλεγχο, όχι επαναποστολή. */}
+                {e.aadeState === "indeterminate" ? (
+                  <span
+                    className="badge badge-warn"
+                    title="Η ΑΑΔΕ δεν απάντησε — μπορεί να έχει ήδη καταχωρηθεί. Άνοιξε την εγγραφή για έλεγχο."
+                  >
+                    ⚠️ Χρειάζεται έλεγχος
                   </span>
+                ) : (
+                  e.pendingAction && (
+                    <span className="badge badge-warn" title={PENDING_LABELS[e.pendingAction]}>
+                      ⏳ Εκκρεμεί επιβεβαίωση
+                    </span>
+                  )
                 )}
                 <span className="muted small">{fmt(e.createdAt)}</span>
               </button>
@@ -121,12 +145,40 @@ export default function HistoryLog({ entries, loading, onRefresh }) {
                   {!detail && !detailErr && <p className="muted">Φόρτωση…</p>}
                   {detail && (
                     <>
-                      {detail.pendingAction && (
+                      {/* Άγνωστη έκβαση: η ΑΑΔΕ ΜΠΟΡΕΙ να έχει ήδη
+                          καταχωρήσει. Η επαναποστολή είναι μπλοκαρισμένη στο
+                          backend (409) — η μόνη σωστή ενέργεια είναι ο
+                          έλεγχος, αλλιώς κινδυνεύει διπλή εγγραφή. */}
+                      {detail.aadeState === "indeterminate" && (
+                        <div className="alert alert-warn">
+                          <p>
+                            ⚠️ Η αποστολή ({PENDING_LABELS[detail.pendingAction] ||
+                              "τελευταίος Χρόνος"}) δεν πήρε σαφή απάντηση από
+                            την ΑΑΔΕ. Η εγγραφή <b>μπορεί να έχει ήδη
+                            καταχωρηθεί</b> — μην ξαναστείλεις πριν γίνει
+                            έλεγχος, γιατί θα δημιουργηθεί διπλή εγγραφή.
+                          </p>
+                          {resendErr && <p className="alert-error">{resendErr}</p>}
+                          {actionMsg && <p className="ok">{actionMsg}</p>}
+                          <button
+                            className="btn btn-primary btn-sm"
+                            disabled={resending}
+                            onClick={() => handleVerify(detail.id)}
+                          >
+                            {resending ? "Έλεγχος…" : "🔍 Έλεγχος στην ΑΑΔΕ"}
+                          </button>
+                        </div>
+                      )}
+
+                      {detail.pendingAction && detail.aadeState !== "indeterminate" && (
                         <div className="alert alert-warn">
                           <p>⏳ {PENDING_LABELS[detail.pendingAction]}. Η εγγραφή
                             είναι αποθηκευμένη τοπικά — πάτησε «Επαναποστολή»
-                            για να ξαναδοκιμάσεις (π.χ. αν έπεσε το internet).</p>
+                            για να ξαναδοκιμάσεις (π.χ. αν έπεσε το internet).
+                            Γίνεται πρώτα έλεγχος στην ΑΑΔΕ, ώστε να μη
+                            σταλεί κάτι που έχει ήδη καταχωρηθεί.</p>
                           {resendErr && <p className="alert-error">{resendErr}</p>}
+                          {actionMsg && <p className="ok">{actionMsg}</p>}
                           <button
                             className="btn btn-primary btn-sm"
                             disabled={resending}

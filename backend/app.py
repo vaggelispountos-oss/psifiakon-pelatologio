@@ -21,7 +21,6 @@ from datetime import datetime, timedelta
 import requests
 from flask import Flask, current_app, g, jsonify, request
 from flask_cors import CORS
-from sqlalchemy import inspect, text
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from auth import init_auth, require_auth
@@ -70,56 +69,26 @@ def create_app():
     db.init_app(app)
     init_auth(app)
 
-    # Δημιουργία της βάσης αυτόματα στο πρώτο τρέξιμο
-    with app.app_context():
-        db.create_all()
-        _add_missing_columns(app)
+    # Δημιουργία/ενημέρωση σχήματος βάσης: ΠΛΕΟΝ μέσω Alembic (migrations/),
+    # ΟΧΙ αυτόματα εδώ.
+    #
+    # Παλιότερα, αυτό το σημείο έτρεχε db.create_all() + ένα χειροκίνητο
+    # "auto-migration" (ALTER TABLE ADD COLUMN) σε ΚΑΘΕ εκκίνηση της
+    # εφαρμογής. Δούλευε με 1 process, αλλά:
+    #   - Με >1 gunicorn worker (χρειάζεται — δες render.yaml), πολλά
+    #     processes τρέχουν το ΙΔΙΟ ALTER TABLE ταυτόχρονα στο boot ->
+    #     DuplicateColumn σε Postgres -> crash loop στο deploy.
+    #   - Δεν μπορούσε να προσθέσει indexes, NOT NULL στήλες, renames.
+    # Το Alembic τρέχει ΜΙΑ φορά, ΠΡΙΝ ξεκινήσουν οι gunicorn workers (δες
+    # render.yaml `preDeployCommand`) — ασφαλές ανεξαρτήτως αριθμού workers.
+    #
+    # Dev: για να μη χρειάζεται χειροκίνητο βήμα σε κάθε `python app.py`,
+    # δες το `if __name__ == "__main__"` στο τέλος του αρχείου — τρέχει
+    # `alembic upgrade head` ΜΟΝΟ εκεί (ποτέ κάτω από gunicorn).
 
     register_routes(app)
     register_error_handlers(app)
     return app
-
-
-def _add_missing_columns(app):
-    """
-    Ελαφριά "auto-migration" για SQLite: το db.create_all() φτιάχνει ΜΟΝΟ
-    πίνακες που λείπουν εντελώς — ΔΕΝ προσθέτει νέες στήλες σε πίνακες που
-    ήδη υπάρχουν. Χωρίς αυτό, κάθε φορά που προστίθεται πεδίο σε μοντέλο
-    (π.χ. έγινε ήδη με Settings.installation_id), ΚΑΘΕ υπάρχουσα εγκατάσταση
-    (βάση συνεργείου με πραγματικά δεδομένα) σκάει με
-    "OperationalError: no such column" στο πρώτο request — μη αποδεκτό όταν
-    ο χρήστης είναι ένα συνεργείο χωρίς IT τμήμα να τρέξει migrations.
-    Προσθέτει ΜΟΝΟ nullable στήλες (ασφαλές σε SQLite ΧΩΡΙΣ default value).
-    ΔΕΝ αντικαθιστά πραγματικό εργαλείο migrations (Alembic) — αν χρειαστεί
-    πιο σύνθετη αλλαγή σχήματος (νέα NOT NULL στήλη, rename, κλπ) χρειάζεται
-    χειροκίνητο migration.
-    """
-    inspector = inspect(db.engine)
-    with db.engine.begin() as conn:
-        for table in db.metadata.sorted_tables:
-            if not inspector.has_table(table.name):
-                continue  # νέος πίνακας -> τον έφτιαξε ήδη το create_all()
-            existing = {c["name"] for c in inspector.get_columns(table.name)}
-            for column in table.columns:
-                if column.name in existing:
-                    continue
-                if not column.nullable:
-                    app.logger.warning(
-                        "Auto-migration: λείπει η NOT NULL στήλη '%s.%s' — "
-                        "χρειάζεται χειροκίνητο migration, ΔΕΝ προστέθηκε αυτόματα.",
-                        table.name,
-                        column.name,
-                    )
-                    continue
-                col_type = column.type.compile(db.engine.dialect)
-                conn.execute(
-                    text(
-                        f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {col_type}'
-                    )
-                )
-                app.logger.info(
-                    "Auto-migration: πρόσθεσα στήλη %s.%s", table.name, column.name
-                )
 
 
 # --------------------------------------------------------------------
@@ -291,8 +260,7 @@ def _build_aade(settings):
     # force_real_aade: per-workshop override (δες /api/admin/.../aade-mode)
     # ώστε ΕΝΑ workshop να δοκιμάσει πραγματική ΑΑΔΕ χωρίς να αλλάξει
     # συμπεριφορά για όλους τους υπόλοιπους tenants στο ίδιο deployment.
-    use_mock = current_app.config["USE_MOCK_AADE"] and not settings.force_real_aade
-    if use_mock:
+    if _use_mock(settings):
         return MockAadeService(**creds)
     # Πραγματική ΑΑΔΕ — ίδιο interface, περνά και το base_url (dev/prod).
     from real_aade import RealAadeService
@@ -370,6 +338,275 @@ def _find_correlation(requested_doc, id_dcl):
         if str(id_dcl) in ids:
             return c
     return None
+
+
+# --------------------------------------------------------------------
+# Προστασία από ΔΙΠΛΕΣ εγγραφές στην ΑΑΔΕ
+# --------------------------------------------------------------------
+# Κάθε SendClient δημιουργεί ΝΕΑ εγγραφή στο Ψηφιακό Πελατολόγιο· δεν υπάρχει
+# idempotency key ούτε τρόπος να «αναιρέσεις» μια διπλή καταχώρηση πέρα από
+# CancelClient. Άρα ΠΟΤΕ δεν ξαναστέλνουμε κάτι που ΜΠΟΡΕΙ να έχει ήδη
+# καταχωρηθεί, χωρίς πρώτα να ρωτήσουμε την ΑΑΔΕ (RequestClients).
+#
+# Δύο μηχανισμοί συνεργάζονται:
+#   1) real_aade._post_xml σημαδεύει τα αιτήματα με άγνωστη έκβαση
+#      (indeterminate) αντί να κάνει τυφλό retry.
+#   2) Εδώ, ΚΑΘΕ επαναποστολή περνά πρώτα από έλεγχο του τι ξέρει η ΑΑΔΕ.
+# --------------------------------------------------------------------
+
+# Πόσες σελίδες RequestClients σαρώνουμε το πολύ ψάχνοντας «ορφανή» εγγραφή
+# (στάλθηκε, αλλά χάθηκε η απάντηση με το idDcl).
+ORPHAN_SEARCH_MAX_PAGES = 20
+
+# Χρονικό περιθώριο γύρω από τον χρόνο δημιουργίας όταν ψάχνουμε ορφανή
+# εγγραφή. Γενναιόδωρο σκόπιμα: η ΑΑΔΕ επιστρέφει ώρα Ελλάδος ενώ εμείς
+# κρατάμε UTC (διαφορά 2-3 ώρες), συν τυχόν απόκλιση ρολογιών. Το φίλτρο
+# χρόνου είναι ΔΕΥΤΕΡΕΥΟΝ κριτήριο — το κύριο είναι πινακίδα + αχρησιμοποίητο
+# idDcl — οπότε προτιμάμε ένα φαρδύ παράθυρο από ένα false negative που θα
+# οδηγούσε σε διπλή καταχώρηση.
+ORPHAN_TIME_MARGIN = timedelta(hours=6)
+
+
+def _as_naive(dt):
+    """
+    Κόβει το tzinfo ώστε να συγκρίνονται datetimes χωρίς TypeError.
+
+    Αναγκαίο γιατί στο ίδιο σημείο συναντιούνται τρεις πηγές: το utcnow()
+    (tz-aware), οι στήλες DateTime (naive όταν διαβαστούν από τη βάση) και το
+    _parse_aade_dt (naive ή aware, ανάλογα με το τι στέλνει η ΑΑΔΕ). Χωρίς
+    αυτό, ο έλεγχος διπλοεγγραφής θα έσκαγε ακριβώς τη στιγμή που τον
+    χρειαζόμαστε. (Η ρίζα του προβλήματος — μεικτές ζώνες ώρας στην ίδια
+    στήλη — παραμένει· δες _parse_aade_dt.)
+    """
+    if dt is not None and dt.tzinfo is not None:
+        return dt.replace(tzinfo=None)
+    return dt
+
+
+def _mark_indeterminate(entry, action):
+    """Σημαδεύει ότι ο «Χρόνος» `action` στάλθηκε αλλά η έκβαση είναι άγνωστη."""
+    entry.aade_state = "indeterminate"
+    entry.aade_pending_method = action
+
+
+def _clear_indeterminate(entry):
+    entry.aade_state = None
+    entry.aade_pending_method = None
+
+
+def _fail_aade(entry, method, action, payload, result):
+    """
+    Κοινός χειρισμός αποτυχημένης κλήσης ΑΑΔΕ: audit log + commit (ώστε να
+    μη χαθεί ό,τι έχει αποθηκευτεί τοπικά) + καθαρό σφάλμα στον χρήστη.
+
+    Ξεχωρίζει τη ΒΕΒΑΙΗ αποτυχία (ξαναδοκίμασε ελεύθερα) από την ΑΓΝΩΣΤΗ
+    έκβαση (μπορεί να καταχωρήθηκε — απαιτείται έλεγχος πρώτα).
+    """
+    _log_aade(entry.id if entry is not None else None, method, payload, result, False)
+    if result.get("indeterminate") and entry is not None:
+        _mark_indeterminate(entry, action)
+        db.session.commit()
+        raise ApiError(
+            f"{result['error']} Πάτησε «Έλεγχος στην ΑΑΔΕ» για να διαπιστωθεί "
+            "αν καταχωρήθηκε, πριν δοκιμάσεις ξανά.",
+            502,
+        )
+    db.session.commit()
+    raise ApiError(
+        f"ΑΑΔΕ {method} error: {result['error']} — έλεγξε τα στοιχεία ΑΑΔΕ στις "
+        "Ρυθμίσεις ή δοκίμασε ξανά σε λίγο.",
+        502,
+    )
+
+
+def _use_mock(settings):
+    """Ίδια λογική με _build_aade — το per-workshop override υπερισχύει."""
+    return current_app.config["USE_MOCK_AADE"] and not settings.force_real_aade
+
+
+def _request_around(aade, id_dcl):
+    """
+    RequestClients στενά γύρω από ΜΙΑ συγκεκριμένη εγγραφή.
+
+    ΠΡΟΣΟΧΗ: το dclid της RequestClients είναι cursor (επιστρέφει εγγραφές με
+    DCLID > dclid), όχι «δώσε μου αυτήν». Γι' αυτό ζητάμε [id_dcl-1, id_dcl].
+    """
+    if id_dcl and str(id_dcl).isdigit():
+        target = int(id_dcl)
+        return aade.request_clients(dclid=max(target - 1, 1), max_dclid=target)
+    return aade.request_clients(dclid=1)
+
+
+def _apply_aade_progress(entry, res):
+    """
+    Συγχρονίζει την τοπική εγγραφή με τα ΑΥΘΕΝΤΙΚΑ στοιχεία της ΑΑΔΕ — πηγή
+    αλήθειας, ό,τι κι αν την ενημέρωσε (εμείς ή π.χ. το λογισμικό του λογιστή).
+
+    Κοινή λογική για reconcile / έλεγχο πριν από επαναποστολή / verify, ώστε
+    να μην υπάρχουν τρεις εκδοχές του «τι λέει η ΑΑΔΕ» που αποκλίνουν.
+
+    @returns (updated_fields, aade_record|None)
+    """
+    aade_rec = _extract_aade_record(res, entry.id_dcl)
+    if aade_rec is None:
+        return [], None
+
+    updated = []
+    c_dt = _parse_aade_dt(aade_rec.get("creationDateTime"))
+    if c_dt is not None and c_dt != entry.creation_date_time:
+        entry.creation_date_time = c_dt
+        updated.append("creationDateTime")
+    comp_dt = _parse_aade_dt(aade_rec.get("completionDateTime"))
+    if comp_dt is not None and comp_dt != entry.completion_date_time:
+        entry.completion_date_time = comp_dt
+        updated.append("completionDateTime")
+
+    category = aade_rec.get("providedServiceCategory")
+    if category not in (None, "") and _parse_int(
+        category, "providedServiceCategory"
+    ) != entry.provided_service_category:
+        entry.provided_service_category = _parse_int(category, "providedServiceCategory")
+        updated.append("providedServiceCategory")
+    other = aade_rec.get("providedServiceCategoryOther")
+    if other and other != entry.provided_service_category_other:
+        entry.provided_service_category_other = other
+        updated.append("providedServiceCategoryOther")
+    invoice_kind = aade_rec.get("invoiceKind")
+    if invoice_kind not in (None, "") and _parse_int(
+        invoice_kind, "invoiceKind"
+    ) != entry.invoice_kind:
+        entry.invoice_kind = _parse_int(invoice_kind, "invoiceKind")
+        updated.append("invoiceKind")
+
+    cancellation = _find_cancellation(res, entry.id_dcl)
+    correlation = _find_correlation(res, entry.id_dcl)
+
+    # Ιεράρχηση τελικής κατάστασης: ακύρωση > συσχέτιση ΜΑΡΚ > ολοκλήρωση
+    # > σε εξέλιξη (2ος Χρόνος) > ό,τι ξέρουμε τοπικά.
+    if cancellation is not None:
+        new_status = "cancelled"
+    elif correlation is not None:
+        new_status = "correlated"
+    elif str(aade_rec.get("entryCompletion")).lower() == "true":
+        new_status = "completed"
+        entry.entry_completion = True
+    elif category not in (None, ""):
+        new_status = "in_progress"
+    else:
+        new_status = entry.status
+
+    if new_status != entry.status:
+        entry.status = new_status
+        updated.append("status")
+
+    if correlation is not None:
+        mark = correlation.get("mark")
+        if mark and mark != entry.mark:
+            entry.mark = mark
+            updated.append("mark")
+        correlate_id = correlation.get("correlateId")
+        if correlate_id and correlate_id != entry.correlate_id:
+            entry.correlate_id = correlate_id
+            updated.append("correlateId")
+
+    return updated, aade_rec
+
+
+def _aade_already_has(entry, action, res, aade_rec):
+    """
+    True αν η ΑΑΔΕ έχει ΗΔΗ καταχωρημένο αυτό που θα έστελνε το `action` —
+    δηλαδή η επαναποστολή θα δημιουργούσε ΔΙΠΛΗ εγγραφή.
+    """
+    if action == "entry":
+        return aade_rec is not None
+    if aade_rec is None:
+        return False
+    if action == "service":
+        return aade_rec.get("providedServiceCategory") not in (None, "")
+    if action == "exit":
+        return str(aade_rec.get("entryCompletion")).lower() == "true"
+    if action == "correlate":
+        return _find_correlation(res, entry.id_dcl) is not None
+    return False
+
+
+def _known_dcl_ids(workshop_id):
+    """Όλα τα idDcl που ήδη χρησιμοποιούνται τοπικά — ώστε η αναζήτηση ορφανής
+    εγγραφής να μη «υιοθετήσει» idDcl που ανήκει σε άλλη τοπική εγγραφή."""
+    rows = (
+        db.session.query(DclEntry.id_dcl)
+        .filter(DclEntry.workshop_id == workshop_id, DclEntry.id_dcl.isnot(None))
+        .all()
+    )
+    return {str(r[0]) for r in rows}
+
+
+def _find_orphan_send(aade, workshop_id, plate, not_before):
+    """
+    Ψάχνει στην ΑΑΔΕ εγγραφή που ΕΜΕΙΣ στείλαμε αλλά της οποίας η απάντηση
+    (και μαζί το idDcl) χάθηκε — το κλασικό read timeout στον 1ο Χρόνο.
+
+    Χωρίς αυτόν τον έλεγχο, η μόνη επιλογή του χρήστη είναι «Επαναποστολή»,
+    που δημιουργεί ΔΕΥΤΕΡΗ εγγραφή για το ίδιο όχημα χωρίς να το μάθει ποτέ.
+
+    Κριτήρια ταύτισης (όλα μαζί):
+      - ίδια πινακίδα (κανονικοποιημένη, ελληνικά/λατινικά αδιάφορα)
+      - idDcl που ΔΕΝ χρησιμοποιείται ήδη από άλλη τοπική εγγραφή
+      - χρόνος δημιουργίας μέσα στο ORPHAN_TIME_MARGIN από την προσπάθειά μας
+
+    Ξεκινά τη σάρωση από το μεγαλύτερο idDcl που ήδη ξέρουμε (cursor), οπότε
+    δεν ξανασαρώνει όλο το ιστορικό.
+
+    @returns {"match": {...}|None} ή {"error": ...}
+    """
+    target = _normalize_plate(plate)
+    not_before = _as_naive(not_before)
+    taken = _known_dcl_ids(workshop_id)
+    numeric = [int(x) for x in taken if str(x).isdigit()]
+    dclid = max(numeric) - 1 if numeric else 0
+
+    continuation = None
+    for _ in range(ORPHAN_SEARCH_MAX_PAGES):
+        res = aade.request_clients(dclid=dclid, continuation_token=continuation)
+        if "error" in res:
+            return {"error": res["error"]}
+
+        clients = res.get("clients") or []
+        if not clients:
+            return {"match": None}
+
+        for client in clients:
+            init = client.get("InitialClientData", {}) or {}
+            id_dcl = str(init.get("idDcl") or "").strip()
+            if not id_dcl or id_dcl in taken:
+                continue
+
+            use_case = init.get("useCase") or {}
+            found_plate = (use_case.get("garage") or {}).get(
+                "vehicleRegistrationNumber"
+            ) or (use_case.get("rental") or {}).get("vehicleRegistrationNumber")
+            if not found_plate or _normalize_plate(found_plate) != target:
+                continue
+
+            created = _as_naive(_parse_aade_dt(init.get("creationDateTime")))
+            if (
+                created is not None
+                and not_before is not None
+                and created < not_before - ORPHAN_TIME_MARGIN
+            ):
+                continue
+
+            return {
+                "match": {"idDcl": id_dcl, "creationDateTime": created, "res": res}
+            }
+
+        continuation = res.get("continuationToken")
+        if not continuation:
+            return {"match": None}
+
+    # Φτάσαμε στο όριο σελίδων χωρίς εύρεση — ΔΕΝ δηλώνουμε «δεν υπάρχει»,
+    # γιατί ένα false negative εδώ σημαίνει διπλή καταχώρηση.
+    return {"match": None, "truncated": True}
 
 
 # --------------------------------------------------------------------
@@ -620,8 +857,7 @@ def register_routes(app):
 
         # Σεβασμός mock/real switch (ίδια λογική με _build_aade: το per-workshop
         # force_real_aade υπερισχύει του global USE_MOCK_AADE).
-        use_mock = current_app.config["USE_MOCK_AADE"] and not settings.force_real_aade
-        if use_mock:
+        if _use_mock(settings):
             return jsonify(
                 {"ok": True, "message": "Mock mode — δεν έγινε πραγματική κλήση"}
             )
@@ -786,13 +1022,12 @@ def register_routes(app):
         result = aade.send_client(aade_payload)
 
         if "error" in result:
-            _log_aade(entry.id, "SendClient", aade_payload, result, False)
-            db.session.commit()
-            raise ApiError(f"ΑΑΔΕ SendClient error: {result['error']} — έλεγξε τα στοιχεία ΑΑΔΕ στις Ρυθμίσεις ή δοκίμασε ξανά σε λίγο.", 502)
+            _fail_aade(entry, "SendClient", "entry", aade_payload, result)
 
         # Αποθήκευση απάντησης ΑΑΔΕ
         entry.id_dcl = result["idDcl"]
         entry.creation_date_time = utcnow()
+        _clear_indeterminate(entry)
         _log_aade(entry.id, "SendClient", aade_payload, result, True)
         db.session.commit()
 
@@ -857,11 +1092,10 @@ def register_routes(app):
         result = aade.update_client(entry.id_dcl, aade_payload)
 
         if "error" in result:
-            _log_aade(entry.id, "UpdateClient", aade_payload, result, False)
-            db.session.commit()
-            raise ApiError(f"ΑΑΔΕ UpdateClient error: {result['error']} — έλεγξε τα στοιχεία ΑΑΔΕ στις Ρυθμίσεις ή δοκίμασε ξανά σε λίγο.", 502)
+            _fail_aade(entry, "UpdateClient", "service", aade_payload, result)
 
         entry.status = "in_progress"
+        _clear_indeterminate(entry)
         _log_aade(entry.id, "UpdateClient", aade_payload, result, True)
         db.session.commit()
 
@@ -951,14 +1185,13 @@ def register_routes(app):
         result = aade.update_client(entry.id_dcl, aade_payload)
 
         if "error" in result:
-            _log_aade(entry.id, "UpdateClient", aade_payload, result, False)
-            db.session.commit()
-            raise ApiError(f"ΑΑΔΕ UpdateClient error: {result['error']} — έλεγξε τα στοιχεία ΑΑΔΕ στις Ρυθμίσεις ή δοκίμασε ξανά σε λίγο.", 502)
+            _fail_aade(entry, "UpdateClient", "exit", aade_payload, result)
 
         # Η ΑΑΔΕ βάζει το completionDateTime
         entry.entry_completion = True
         entry.status = "completed"
         entry.completion_date_time = utcnow()
+        _clear_indeterminate(entry)
         _log_aade(entry.id, "UpdateClient", aade_payload, result, True)
         db.session.commit()
 
@@ -992,12 +1225,11 @@ def register_routes(app):
         result = aade.client_correlations(entry.id_dcl, aade_payload)
 
         if "error" in result:
-            _log_aade(entry.id, "ClientCorrelations", aade_payload, result, False)
-            db.session.commit()
-            raise ApiError(f"ΑΑΔΕ ClientCorrelations error: {result['error']} — έλεγξε τα στοιχεία ΑΑΔΕ στις Ρυθμίσεις ή δοκίμασε ξανά σε λίγο.", 502)
+            _fail_aade(entry, "ClientCorrelations", "correlate", aade_payload, result)
 
         entry.correlate_id = result["correlateId"]
         entry.status = "correlated"
+        _clear_indeterminate(entry)
         _log_aade(entry.id, "ClientCorrelations", aade_payload, result, True)
         db.session.commit()
 
@@ -1017,11 +1249,10 @@ def register_routes(app):
         result = aade.cancel_client(entry.id_dcl)
 
         if "error" in result:
-            _log_aade(entry.id, "CancelClient", {}, result, False)
-            db.session.commit()
-            raise ApiError(f"ΑΑΔΕ CancelClient error: {result['error']} — έλεγξε τα στοιχεία ΑΑΔΕ στις Ρυθμίσεις ή δοκίμασε ξανά σε λίγο.", 502)
+            _fail_aade(entry, "CancelClient", "cancel", {}, result)
 
         entry.status = "cancelled"
+        _clear_indeterminate(entry)
         _log_aade(entry.id, "CancelClient", {}, result, True)
         db.session.commit()
 
@@ -1239,17 +1470,61 @@ def register_routes(app):
         if action is None:
             raise ApiError("Δεν υπάρχει κάτι εκκρεμές προς επαναποστολή για αυτή την εγγραφή.")
 
+        # ΦΡΑΓΜΟΣ #1: η προηγούμενη αποστολή έμεινε σε άγνωστη κατάσταση —
+        # μπορεί να καταχωρήθηκε ήδη. Επαναποστολή εδώ = σχεδόν βέβαιη διπλή
+        # εγγραφή στο Ψηφιακό Πελατολόγιο. Ο χρήστης πρέπει πρώτα να τρέξει
+        # τον έλεγχο (/verify), που είτε τη συνδέει είτε ξεκαθαρίζει ότι
+        # δεν καταχωρήθηκε ποτέ.
+        if entry.aade_state == "indeterminate":
+            raise ApiError(
+                "Η προηγούμενη αποστολή δεν είχε σαφή απάντηση από την ΑΑΔΕ — "
+                "η εγγραφή μπορεί να έχει ήδη καταχωρηθεί. Πάτησε πρώτα "
+                "«Έλεγχος στην ΑΑΔΕ» ώστε να μη δημιουργηθεί διπλή εγγραφή.",
+                409,
+            )
+
         settings = _require_credentials()
         aade = _build_aade(settings)
 
+        # ΦΡΑΓΜΟΣ #2: πριν ξαναστείλουμε ΟΤΙΔΗΠΟΤΕ, ρωτάμε την ΑΑΔΕ τι ξέρει
+        # ήδη. Το «Επαναποστολή» υπάρχει για διακοπές δικτύου, αλλά μια
+        # διακοπή ΜΕΤΑ την επιτυχή παραλαβή από την ΑΑΔΕ είναι εξίσου πιθανή
+        # με μία πριν — και μόνο η ΑΑΔΕ ξέρει ποια από τις δύο συνέβη.
+        # (Στο mock δεν έχει νόημα: δεν υπάρχει πραγματική κατάσταση εκεί.)
+        if entry.id_dcl and not _use_mock(settings):
+            check = _request_around(aade, entry.id_dcl)
+            if "error" not in check:
+                updated, aade_rec = _apply_aade_progress(entry, check)
+                if _aade_already_has(entry, action, check, aade_rec):
+                    _clear_indeterminate(entry)
+                    db.session.commit()
+                    payload = entry.to_dict()
+                    payload["resendResult"] = "already_recorded"
+                    payload["resendMessage"] = (
+                        "Η ΑΑΔΕ έχει ήδη αυτή την καταχώρηση — δεν στάλθηκε "
+                        "ξανά. Η τοπική εγγραφή συγχρονίστηκε."
+                    )
+                    payload["updated"] = updated
+                    return jsonify(payload)
+                # Δεν την έχει: συνεχίζουμε στην κανονική αποστολή παρακάτω,
+                # κρατώντας ό,τι μάθαμε (π.χ. διορθωμένες ημερομηνίες).
+
         if action == "entry":
             is_rental = entry.client_service_type == 1
+            # ⚠️ Το payload πρέπει να είναι ΤΑΥΤΟΣΗΜΟ με του create_entry —
+            # τα vehicleCategory/vehicleFactory ζουν στον Customer (η αρχική
+            # κλήση τα είχε από το request body, εδώ τα διαβάζουμε από τη βάση).
+            customer = Customer.query.filter_by(
+                plate=entry.plate, workshop_id=g.workshop_id
+            ).first()
             aade_payload = {
                 "vehicleRegistrationNumber": entry.plate,
                 "branch": entry.branch,
                 "clientServiceType": entry.client_service_type,
                 "serviceType": entry.service_type,
                 "useCase": "rental" if is_rental else "garage",
+                "vehicleCategory": customer.vehicle_category if customer else None,
+                "vehicleFactory": customer.vehicle_factory if customer else None,
             }
             if is_rental:
                 aade_payload["vehicleMovementPurpose"] = entry.vehicle_movement_purpose
@@ -1291,13 +1566,10 @@ def register_routes(app):
             method = "ClientCorrelations"
 
         if "error" in result:
-            _log_aade(entry.id, method, aade_payload, result, False)
-            db.session.commit()
-            raise ApiError(
-                f"Η επαναποστολή απέτυχε — {result['error']} "
-                "Η εγγραφή παραμένει αποθηκευμένη τοπικά, δοκίμασε ξανά αργότερα.",
-                502,
-            )
+            # Ίδιος χειρισμός με την αρχική αποστολή: αν η έκβαση είναι
+            # άγνωστη, η εγγραφή σημαδεύεται και η επόμενη επαναποστολή
+            # μπλοκάρεται μέχρι να γίνει έλεγχος.
+            _fail_aade(entry, method, action, aade_payload, result)
 
         if action == "entry":
             entry.id_dcl = result["idDcl"]
@@ -1312,9 +1584,126 @@ def register_routes(app):
             entry.correlate_id = result["correlateId"]
             entry.status = "correlated"
 
+        _clear_indeterminate(entry)
         _log_aade(entry.id, method, aade_payload, result, True)
         db.session.commit()
-        return jsonify(entry.to_dict())
+        payload = entry.to_dict()
+        payload["resendResult"] = "sent"
+        return jsonify(payload)
+
+    # ----------------------------------------------------------------
+    # Έλεγχος μετά από αποστολή ΑΓΝΩΣΤΗΣ έκβασης (aade_state="indeterminate")
+    #
+    # Απαντά στη μοναδική ερώτηση που δεν μπορεί να απαντήσει ο χρήστης:
+    # «καταχωρήθηκε τελικά ή όχι;». Είναι η ΜΟΝΗ διέξοδος από το μπλόκο του
+    # resend_entry — και ο λόγος που το μπλόκο είναι ανεκτό.
+    # ----------------------------------------------------------------
+    @app.route("/api/dcl/entries/<int:entry_id>/verify", methods=["POST"])
+    @require_auth
+    def verify_entry(entry_id):
+        entry = _get_entry_or_404(entry_id)
+        settings = _require_credentials()
+
+        # Στο mock δεν υπάρχει πραγματική κατάσταση να ελεγχθεί — απλώς
+        # ξεμπλοκάρουμε, αλλιώς η εγγραφή θα έμενε κολλημένη για πάντα.
+        if _use_mock(settings):
+            _clear_indeterminate(entry)
+            db.session.commit()
+            payload = entry.to_dict()
+            payload["verification"] = "mock"
+            payload["verificationMessage"] = (
+                "Mock mode — δεν έγινε πραγματικός έλεγχος. Η εγγραφή "
+                "ξεμπλοκαρίστηκε."
+            )
+            return jsonify(payload)
+
+        aade = _build_aade(settings)
+
+        # --- Περίπτωση Α: ξέρουμε το idDcl -> στοχευμένος έλεγχος ---
+        if entry.id_dcl:
+            res = _request_around(aade, entry.id_dcl)
+            _log_aade(entry.id, "RequestClients", {"verify": entry.id_dcl}, res,
+                      "error" not in res)
+            if "error" in res:
+                db.session.commit()
+                raise ApiError(
+                    f"Ο έλεγχος με την ΑΑΔΕ απέτυχε: {res['error']} "
+                    "Η εγγραφή παραμένει σε αναμονή ελέγχου — δοκίμασε ξανά.",
+                    502,
+                )
+            updated, aade_rec = _apply_aade_progress(entry, res)
+            _clear_indeterminate(entry)
+            db.session.commit()
+            payload = entry.to_dict()
+            payload["updated"] = updated
+            payload["verification"] = "found" if aade_rec else "not_found"
+            payload["verificationMessage"] = (
+                "Η εγγραφή βρέθηκε στην ΑΑΔΕ και συγχρονίστηκε."
+                if aade_rec
+                else "Δεν βρέθηκε στην ΑΑΔΕ — μπορείς να ξαναστείλεις με ασφάλεια."
+            )
+            return jsonify(payload)
+
+        # --- Περίπτωση Β: χάθηκε το idDcl -> αναζήτηση «ορφανής» εγγραφής ---
+        # Αυτή είναι η επικίνδυνη περίπτωση: αν στα τυφλά ξαναστείλουμε και η
+        # ΑΑΔΕ είχε ήδη καταχωρήσει, το όχημα μπαίνει δύο φορές στο πελατολόγιο.
+        found = _find_orphan_send(
+            aade, g.workshop_id, entry.plate, entry.created_at
+        )
+        _log_aade(
+            entry.id,
+            "RequestClients",
+            {"verify": "orphan-search", "plate": entry.plate},
+            {k: v for k, v in found.items() if k != "match"},
+            "error" not in found,
+        )
+
+        if "error" in found:
+            db.session.commit()
+            raise ApiError(
+                f"Ο έλεγχος με την ΑΑΔΕ απέτυχε: {found['error']} "
+                "Η εγγραφή παραμένει σε αναμονή ελέγχου — δοκίμασε ξανά.",
+                502,
+            )
+
+        match = found.get("match")
+        if match:
+            # Βρέθηκε: την υιοθετούμε αντί να στείλουμε δεύτερη.
+            entry.id_dcl = match["idDcl"]
+            entry.creation_date_time = match["creationDateTime"] or entry.creation_date_time
+            updated, _ = _apply_aade_progress(entry, match["res"])
+            _clear_indeterminate(entry)
+            db.session.commit()
+            payload = entry.to_dict()
+            payload["updated"] = ["idDcl"] + updated
+            payload["verification"] = "adopted"
+            payload["verificationMessage"] = (
+                f"Η εγγραφή ΕΙΧΕ καταχωρηθεί στην ΑΑΔΕ (idDcl {entry.id_dcl}) — "
+                "συνδέθηκε τοπικά. Δεν χρειάζεται επαναποστολή."
+            )
+            return jsonify(payload)
+
+        if found.get("truncated"):
+            # Δεν σαρώσαμε όλο το εύρος: ΔΕΝ δηλώνουμε «δεν υπάρχει», γιατί
+            # ένα λάθος εδώ οδηγεί κατευθείαν σε διπλή καταχώρηση.
+            db.session.commit()
+            raise ApiError(
+                "Ο έλεγχος δεν ολοκληρώθηκε (πολλές εγγραφές προς σάρωση). "
+                "Δοκίμασε «Εισαγωγή από ΑΑΔΕ» και μετά ξανά τον έλεγχο, ή "
+                "επιβεβαίωσε χειροκίνητα στο myDATA πριν ξαναστείλεις.",
+                409,
+            )
+
+        # Δεν καταχωρήθηκε ποτέ -> ασφαλές να ξαναστείλει ο χρήστης.
+        _clear_indeterminate(entry)
+        db.session.commit()
+        payload = entry.to_dict()
+        payload["verification"] = "not_found"
+        payload["verificationMessage"] = (
+            "Δεν βρέθηκε καμία αντίστοιχη εγγραφή στην ΑΑΔΕ — μπορείς να "
+            "πατήσεις «Επαναποστολή» με ασφάλεια."
+        )
+        return jsonify(payload)
 
     # ----------------------------------------------------------------
     # Reconciliation — σύγκριση τοπικής εγγραφής με την ΑΑΔΕ (RequestClients)
@@ -1338,8 +1727,7 @@ def register_routes(app):
 
         # Σεβασμός mock/real switch (ίδια λογική με _build_aade/test-connection).
         settings = _get_settings()
-        use_mock = current_app.config["USE_MOCK_AADE"] and not settings.force_real_aade
-        if use_mock:
+        if _use_mock(settings):
             return jsonify(
                 {
                     "ok": True,
@@ -1357,24 +1745,11 @@ def register_routes(app):
             )
         aade = _build_aade(settings)
 
-        # ΠΡΟΣΟΧΗ: το dclid της RequestClients ΔΕΝ είναι "δώσε μου αυτή την
-        # εγγραφή" — είναι cursor: επιστρέφει εγγραφές με DCLID > dclid (ίδια
-        # λογική με το mark streaming στα τιμολόγια myDATA). Αν στείλουμε το
-        # ίδιο id_dcl της εγγραφής, ζητάμε ό,τι είναι ΜΕΤΑ από αυτήν και ποτέ
-        # δεν την βρίσκουμε. Γι' αυτό ζητάμε [id_dcl - 1, id_dcl] — το στενό
-        # εύρος γύρω ΑΚΡΙΒΩΣ από τη συγκεκριμένη εγγραφή.
-        if entry.id_dcl and str(entry.id_dcl).isdigit():
-            target_id = int(entry.id_dcl)
-            dclid = max(target_id - 1, 1)
-            max_dclid = target_id
-        else:
-            dclid = 1
-            max_dclid = None
-        res = aade.request_clients(dclid=dclid, max_dclid=max_dclid)
+        res = _request_around(aade, entry.id_dcl)
         _log_aade(
             entry.id,
             "RequestClients",
-            {"dclid": dclid, "max_dclid": max_dclid},
+            {"reconcile": entry.id_dcl},
             res,
             "error" not in res,
         )
@@ -1383,7 +1758,9 @@ def register_routes(app):
             db.session.commit()
             return jsonify({"ok": False, "reason": res["error"], "local": local})
 
-        aade_rec = _extract_aade_record(res, entry.id_dcl)
+        # Κοινή λογική συγχρονισμού με resend/verify — μία πηγή αλήθειας για
+        # το «τι λέει η ΑΑΔΕ», ώστε οι τρεις διαδρομές να μην αποκλίνουν.
+        updated, aade_rec = _apply_aade_progress(entry, res)
         if aade_rec is None:
             db.session.commit()
             return jsonify(
@@ -1395,63 +1772,6 @@ def register_routes(app):
                     "aade": None,
                 }
             )
-
-        # Ενημέρωση τοπικής εγγραφής με τα ΑΥΘΕΝΤΙΚΑ στοιχεία της ΑΑΔΕ —
-        # πηγή αλήθειας, ό,τι κι αν το ενημέρωσε (εμάς, λογιστικό λογισμικό
-        # που κάνει ClientCorrelations/CancelClient με τα ίδια στοιχεία κ.λπ.).
-        updated = []
-        c_dt = _parse_aade_dt(aade_rec.get("creationDateTime"))
-        if c_dt is not None and c_dt != entry.creation_date_time:
-            entry.creation_date_time = c_dt
-            updated.append("creationDateTime")
-        comp_dt = _parse_aade_dt(aade_rec.get("completionDateTime"))
-        if comp_dt is not None and comp_dt != entry.completion_date_time:
-            entry.completion_date_time = comp_dt
-            updated.append("completionDateTime")
-
-        category = aade_rec.get("providedServiceCategory")
-        if category not in (None, "") and _parse_int(category, "providedServiceCategory") != entry.provided_service_category:
-            entry.provided_service_category = _parse_int(category, "providedServiceCategory")
-            updated.append("providedServiceCategory")
-        other = aade_rec.get("providedServiceCategoryOther")
-        if other and other != entry.provided_service_category_other:
-            entry.provided_service_category_other = other
-            updated.append("providedServiceCategoryOther")
-        invoice_kind = aade_rec.get("invoiceKind")
-        if invoice_kind not in (None, "") and _parse_int(invoice_kind, "invoiceKind") != entry.invoice_kind:
-            entry.invoice_kind = _parse_int(invoice_kind, "invoiceKind")
-            updated.append("invoiceKind")
-
-        cancellation = _find_cancellation(res, entry.id_dcl)
-        correlation = _find_correlation(res, entry.id_dcl)
-
-        # Ιεράρχηση τελικής κατάστασης: ακύρωση > συσχέτιση ΜΑΡΚ > ολοκλήρωση
-        # > σε εξέλιξη (2ος Χρόνος) > ανοιχτή. Η ΑΑΔΕ υπερισχύει πάντα της
-        # τοπικής κατάστασης — μπορεί να έχει προχωρήσει από άλλο λογισμικό.
-        if cancellation is not None:
-            new_status = "cancelled"
-        elif correlation is not None:
-            new_status = "correlated"
-        elif str(aade_rec.get("entryCompletion")).lower() == "true":
-            new_status = "completed"
-        elif category not in (None, ""):
-            new_status = "in_progress"
-        else:
-            new_status = entry.status  # δεν έχει προχωρήσει ακόμα στην ΑΑΔΕ
-
-        if new_status != entry.status:
-            entry.status = new_status
-            updated.append("status")
-
-        if correlation is not None:
-            mark = correlation.get("mark")
-            if mark and mark != entry.mark:
-                entry.mark = mark
-                updated.append("mark")
-            correlate_id = correlation.get("correlateId")
-            if correlate_id and correlate_id != entry.correlate_id:
-                entry.correlate_id = correlate_id
-                updated.append("correlateId")
 
         db.session.commit()
 
@@ -1482,8 +1802,7 @@ def register_routes(app):
                 "Δεν έχουν οριστεί οι κωδικοί ΑΑΔΕ — πήγαινε στις Ρυθμίσεις.", 400
             )
 
-        use_mock = current_app.config["USE_MOCK_AADE"] and not settings.force_real_aade
-        if use_mock:
+        if _use_mock(settings):
             return jsonify(
                 {
                     "ok": True,
@@ -1624,6 +1943,26 @@ app = create_app()
 
 if __name__ == "__main__":
     import os
+
+    # Dev convenience: εφαρμόζει αυτόματα τυχόν εκκρεμή migrations πριν το
+    # boot — ώστε να ΜΗΝ χρειάζεται να θυμάσαι `alembic upgrade head` σε
+    # κάθε `python app.py` (ίδιο ρόλο έπαιζε παλιότερα το db.create_all() +
+    # _add_missing_columns που έτρεχαν μέσα στο create_app()).
+    #
+    # ΑΣΦΑΛΕΣ ΜΟΝΟ εδώ, ΟΧΙ στο create_app(): αυτό το block τρέχει ΜΙΑ φορά,
+    # σε ΕΝΑ process, όταν κάποιος τρέχει `python app.py` απευθείας.
+    # Ο gunicorn (production, δες render.yaml) ΔΕΝ περνά ποτέ από εδώ —
+    # φορτώνει κατευθείαν το `app` module-level object, με πολλαπλούς
+    # workers που θα έτρεχαν το ΙΔΙΟ migration ταυτόχρονα αν ήταν εδώ.
+    # Στο production, το `alembic upgrade head` τρέχει ΜΙΑ φορά ως
+    # preDeployCommand, πριν ξεκινήσουν οι workers.
+    from alembic import command
+    from alembic.config import Config as AlembicConfig
+
+    from config import BASE_DIR
+
+    _alembic_ini = os.path.join(BASE_DIR, "alembic.ini")
+    command.upgrade(AlembicConfig(_alembic_ini), "head")
 
     # Default 5001 — το 5000 το κρατάει συχνά το AirPlay Receiver στο macOS.
     port = int(os.getenv("PORT", "5001"))

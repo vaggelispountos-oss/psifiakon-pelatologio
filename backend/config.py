@@ -9,14 +9,32 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+# Flask (Flask-SQLAlchemy) βάζει το instance_path εδώ by default — εκεί
+# καταλήγει στην πράξη το SQLite αρχείο όταν το URI είναι σχετικό διάδρομος
+# (π.χ. "sqlite:///dcl.db" -> backend/instance/dcl.db, ΟΧΙ backend/dcl.db).
+INSTANCE_DIR = os.path.join(BASE_DIR, "instance")
 
 
 def _normalize_db_url(url):
-    """Το Render (και άλλοι) δίνουν DATABASE_URL με πρόθεμα postgres://, που το
+    """
+    Το Render (και άλλοι) δίνουν DATABASE_URL με πρόθεμα postgres://, που το
     SQLAlchemy 1.4+ απορρίπτει — θέλει postgresql://. Ίδιο connection string,
-    απλά διορθωμένο scheme."""
+    απλά διορθωμένο scheme.
+
+    Για SQLite με ΣΧΕΤΙΚΟ path, μετατρέπουμε ρητά σε απόλυτο μέσα στο
+    instance/ — ΙΔΙΑ σύμβαση με το Flask-SQLAlchemy. Χωρίς αυτό, δύο
+    εργαλεία που ανοίγουν το ΙΔΙΟ "sqlite:///dcl.db" καταλήγουν σε
+    ΔΙΑΦΟΡΕΤΙΚΑ αρχεία ανάλογα με το cwd από το οποίο τρέχουν: το Flask app
+    (μέσω app.py, οπουδήποτε κι αν εκκινείται) πάει σε backend/instance/
+    dcl.db, ενώ ένα plain SQLAlchemy engine (π.χ. Alembic) θα έφτιαχνε
+    backend/dcl.db — δύο βάσεις που «χάνουν» η μία την άλλη σιωπηλά.
+    """
     if url.startswith("postgres://"):
-        return "postgresql://" + url[len("postgres://"):]
+        url = "postgresql://" + url[len("postgres://"):]
+    if url.startswith("sqlite:///") and not url.startswith("sqlite:////"):
+        rel_path = url[len("sqlite:///"):]
+        os.makedirs(INSTANCE_DIR, exist_ok=True)
+        url = "sqlite:///" + os.path.join(INSTANCE_DIR, rel_path)
     return url
 
 

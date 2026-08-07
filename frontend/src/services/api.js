@@ -267,8 +267,18 @@ export function importFromAade() {
 
 // Επαναποστολή — η εγγραφή είναι αποθηκευμένη αλλά ο τελευταίος Χρόνος δεν
 // επιβεβαιώθηκε από την ΑΑΔΕ (π.χ. έπεσε το internet).
+// Το backend ελέγχει ΠΡΩΤΑ τι ξέρει ήδη η ΑΑΔΕ: αν η καταχώρηση υπάρχει,
+// απλώς συγχρονίζει (resendResult="already_recorded") αντί να τη διπλασιάσει.
 export function resendEntry(entry_id) {
   return request(`/api/dcl/entries/${entry_id}/resend`, { method: "POST" });
+}
+
+// Έλεγχος στην ΑΑΔΕ — όταν η προηγούμενη αποστολή δεν πήρε σαφή απάντηση
+// (aadeState="indeterminate"), η επαναποστολή μπλοκάρεται γιατί η εγγραφή
+// μπορεί να έχει ήδη καταχωρηθεί. Αυτό απαντά «καταχωρήθηκε ή όχι;» και
+// είτε συνδέει την υπάρχουσα εγγραφή είτε ξεμπλοκάρει την επαναποστολή.
+export function verifyEntry(entry_id) {
+  return request(`/api/dcl/entries/${entry_id}/verify`, { method: "POST" });
 }
 
 // ---- 1ος Χρόνος — SendClient ----

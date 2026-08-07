@@ -210,6 +210,19 @@ class DclEntry(db.Model):
     # open | in_progress | completed | correlated | cancelled
     status = db.Column(db.String(20), default="open", nullable=False)
 
+    # Κατάσταση της ΤΕΛΕΥΤΑΙΑΣ κλήσης προς την ΑΑΔΕ όταν αυτή δεν έχει σαφή
+    # έκβαση. None = όλα ξεκάθαρα (επιτυχία ή βέβαιη αποτυχία).
+    # "indeterminate" = το αίτημα ΕΦΥΓΕ αλλά δεν ήρθε απάντηση (read timeout,
+    # HTTP 5xx, μη αναγνωρίσιμο XML — δες real_aade._post_xml). Η εγγραφή
+    # ΜΠΟΡΕΙ να υπάρχει ήδη στην ΑΑΔΕ, οπότε η επαναποστολή ΜΠΛΟΚΑΡΕΤΑΙ μέχρι
+    # να γίνει έλεγχος με RequestClients (POST /api/dcl/entries/<id>/verify).
+    # Χωρίς αυτό, ο χρήστης πατάει «Επαναποστολή» και δημιουργεί ΔΕΥΤΕΡΗ
+    # εγγραφή στο Ψηφιακό Πελατολόγιο, χωρίς να το μάθει ποτέ.
+    aade_state = db.Column(db.String(20), nullable=True)
+    # Ποιος «Χρόνος» έμεινε σε άγνωστη κατάσταση (entry|service|exit|
+    # correlate|cancel) — χρειάζεται για να ξέρει το verify ΤΙ να ελέγξει.
+    aade_pending_method = db.Column(db.String(20), nullable=True)
+
     comments = db.Column(db.Text, nullable=True)
 
     created_at = db.Column(db.DateTime, default=utcnow)
@@ -232,6 +245,10 @@ class DclEntry(db.Model):
 
         Ενοικιάσεις (client_service_type=1) ΔΕΝ έχουν 2ο Χρόνο (κατηγορία
         υπηρεσίας) — πάνε κατευθείαν "open" -> "completed" μέσω exit.
+
+        ⚠️ Το pending_action λέει ΤΙ εκκρεμεί, ΟΧΙ ότι είναι ασφαλές να
+        ξανασταλεί. Όταν aade_state == "indeterminate", η επαναποστολή
+        μπλοκάρεται (δες app.resend_entry) μέχρι να γίνει έλεγχος.
         """
         if self.status == "cancelled":
             return None
@@ -312,6 +329,10 @@ class DclEntry(db.Model):
             "correlateId": self.correlate_id,
             "status": self.status,
             "pendingAction": self.pending_action,
+            # Όταν είναι "indeterminate", το frontend δείχνει «Έλεγχος στην
+            # ΑΑΔΕ» αντί για «Επαναποστολή» (δες components/HistoryLog.jsx).
+            "aadeState": self.aade_state,
+            "aadePendingMethod": self.aade_pending_method,
             "comments": self.comments,
             "createdAt": self.created_at.isoformat() if self.created_at else None,
             "updatedAt": self.updated_at.isoformat() if self.updated_at else None,

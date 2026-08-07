@@ -4,8 +4,27 @@ services:
     runtime: python
     plan: free
     rootDir: backend
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app
+    # `alembic upgrade head` τρέχει ΕΔΩ (build step — ΜΙΑ φορά, πριν
+    # ξεκινήσει κανένας gunicorn worker), ΟΧΙ μέσα στο app.py. Το build
+    # τρέχει με τα ίδια envVars του service, άρα βλέπει το πραγματικό
+    # DATABASE_URL. Σχήμα βάσης = αποκλειστική ευθύνη του Alembic πλέον
+    # (δες backend/migrations/) — το app.py δεν κάνει καμία αλλαγή σχήματος
+    # στο boot (δες app.create_app).
+    #
+    # (Αν αναβαθμιστεί το plan και προτιμηθεί `preDeployCommand` αντί για
+    # chaining εδώ, λειτουργικά είναι το ίδιο — και τα δύο τρέχουν μία φορά,
+    # πριν οι workers δεχτούν κίνηση.)
+    buildCommand: pip install -r requirements.txt && alembic upgrade head
+    # --workers 2 --threads 4: με ΕΝΑΝ sync worker (το προηγούμενο default),
+    # ΜΙΑ κλήση προς την ΑΑΔΕ (έως ~60s: 30s timeout × 2 retries — δες
+    # real_aade.py) μπλόκαρε ΟΛΟΥΣ τους υπόλοιπους χρήστες ταυτόχρονα.
+    # Threads (όχι processes) γιατί το bottleneck είναι δικτυακή αναμονή
+    # (I/O προς ΑΑΔΕ), όχι CPU — φθηνότερο σε μνήμη στο free plan.
+    # --timeout 120: πρέπει να είναι ΜΕΓΑΛΥΤΕΡΟ από το χειρότερο σενάριο
+    # της ΑΑΔΕ (60s), αλλιώς ο gunicorn σκοτώνει τον worker ΜΕΣΑ σε μια
+    # κλήση που ίσως μόλις πέτυχε στην ΑΑΔΕ (ακριβώς η κατάσταση που
+    # χειρίζεται το real_aade._post_xml ως indeterminate).
+    startCommand: gunicorn app:app --workers 2 --threads 4 --timeout 120 --graceful-timeout 30
     healthCheckPath: /api/health
     envVars:
       - key: FLASK_ENV
