@@ -14,7 +14,12 @@ services:
     # (Αν αναβαθμιστεί το plan και προτιμηθεί `preDeployCommand` αντί για
     # chaining εδώ, λειτουργικά είναι το ίδιο — και τα δύο τρέχουν μία φορά,
     # πριν οι workers δεχτούν κίνηση.)
-    buildCommand: pip install -r requirements.txt && alembic upgrade head
+    # ΠΡΟΣΩΡΙΝΟ (stamp αντί για upgrade): η production βάση έχει ήδη όλους
+    # τους πίνακες από το παλιό db.create_all(), οπότε το πρώτο upgrade head
+    # έσκαγε με "relation already exists". Το stamp καταγράφει την τρέχουσα
+    # βάση ως ήδη στο 0001 ΧΩΡΙΣ να αλλάξει σχήμα. Μετά το πρώτο επιτυχημένο
+    # deploy με αυτή τη γραμμή, γύρνα το πίσω σε "alembic upgrade head".
+    buildCommand: pip install -r requirements.txt && alembic stamp head
     # --workers 2 --threads 4: με ΕΝΑΝ sync worker (το προηγούμενο default),
     # ΜΙΑ κλήση προς την ΑΑΔΕ (έως ~60s: 30s timeout × 2 retries — δες
     # real_aade.py) μπλόκαρε ΟΛΟΥΣ τους υπόλοιπους χρήστες ταυτόχρονα.
