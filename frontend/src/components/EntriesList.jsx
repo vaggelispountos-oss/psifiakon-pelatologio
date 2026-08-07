@@ -78,6 +78,13 @@ export default function EntriesList({
     return c;
   }, [entries]);
 
+  // Ενοικιάσεις που καθυστερούν να επιστραφούν (δηλώθηκαν για Χ μέρες, έχουν
+  // περάσει, το όχημα είναι ακόμη "open").
+  const overdue = useMemo(
+    () => entries.filter((e) => e.isOverdue),
+    [entries]
+  );
+
   const filtered = useMemo(() => {
     const q = search.trim().toUpperCase();
     return entries.filter((e) => {
@@ -204,6 +211,18 @@ export default function EntriesList({
         εγγραφές που υπάρχουν στο Ψηφιακό Πελατολόγιο αλλά όχι ακόμα εδώ.
       </p>
 
+      {overdue.length > 0 && (
+        <div className="alert alert-warn">
+          ⏰ {overdue.length} {overdue.length === 1 ? "ενοικίαση καθυστερεί" : "ενοικιάσεις καθυστερούν"} να επιστραφούν:{" "}
+          {overdue
+            .map(
+              (e) =>
+                `${e.plate} (${e.overdueDays} ${e.overdueDays === 1 ? "μέρα" : "μέρες"})`
+            )
+            .join(", ")}
+        </div>
+      )}
+
       {importResult && (
         <div
           className={`alert ${
@@ -284,6 +303,12 @@ export default function EntriesList({
                 <div className="entry-plate">{e.plate}</div>
                 <div className="entry-meta">
                   <StatusBadge status={e.status} isRental={isRental} />
+                  {e.isOverdue && (
+                    <span className="badge badge-warn">
+                      ⏰ Καθυστερεί {e.overdueDays}{" "}
+                      {e.overdueDays === 1 ? "μέρα" : "μέρες"}
+                    </span>
+                  )}
                   <span className="mono">{e.idDcl || "—"}</span>
                 </div>
                 <div className="entry-recon">{reconLine(e)}</div>

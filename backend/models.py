@@ -179,6 +179,13 @@ class DclEntry(db.Model):
     vehicle_return_location = db.Column(db.String(250), nullable=True)  # 3ος Χρόνος
     amount = db.Column(db.Float, nullable=True)  # 3ος Χρόνος — Συμφωνηθέν Ποσό (προαιρετικό ανά ΑΑΔΕ spec)
 
+    # Καθαρά τοπικό πεδίο (ΔΕΝ πάει στην ΑΑΔΕ) — πόσες μέρες δηλώθηκε η
+    # ενοικίαση κατά τον 1ο Χρόνο. Χρησιμοποιείται μόνο για να υπολογίσουμε
+    # expected_return_at και να προειδοποιήσουμε αν καθυστερεί η επιστροφή.
+    # Προαιρετικό — αν δεν δοθεί, δεν γίνεται κανένας έλεγχος καθυστέρησης.
+    rental_expected_days = db.Column(db.Integer, nullable=True)
+    expected_return_at = db.Column(db.DateTime, nullable=True)
+
     # --- 3ος Χρόνος ---
     entry_completion = db.Column(db.Boolean, default=False, nullable=False)
     # 1=ΑΛΠ/ΑΠΥ, 2=Τιμολόγιο, 3=ΑΛΠ/ΑΠΥ-ΦΗΜ
@@ -245,6 +252,26 @@ class DclEntry(db.Model):
             return "correlate"
         return None
 
+    @property
+    def is_overdue(self):
+        """True αν πρόκειται για ενοικίαση που έχει ακόμη ανοιχτή (δεν έγινε
+        Ολοκλήρωση/εξοδος) και έχει περάσει η αναμενόμενη ημερομηνία
+        επιστροφής (βλ. rental_expected_days/expected_return_at)."""
+        if self.client_service_type != 1:
+            return False
+        if self.status != "open":
+            return False
+        if self.expected_return_at is None:
+            return False
+        return utcnow().replace(tzinfo=None) > self.expected_return_at
+
+    @property
+    def overdue_days(self):
+        if not self.is_overdue:
+            return None
+        delta = utcnow().replace(tzinfo=None) - self.expected_return_at
+        return delta.days + (1 if delta.seconds > 0 else 0)
+
     def to_dict(self, include_logs=False):
         data = {
             "id": self.id,
@@ -261,6 +288,12 @@ class DclEntry(db.Model):
             "isDiffVehReturnLocation": self.is_diff_return_location,
             "vehicleReturnLocation": self.vehicle_return_location,
             "amount": self.amount,
+            "rentalExpectedDays": self.rental_expected_days,
+            "expectedReturnAt": self.expected_return_at.isoformat()
+            if self.expected_return_at
+            else None,
+            "isOverdue": self.is_overdue,
+            "overdueDays": self.overdue_days,
             "entryCompletion": self.entry_completion,
             "invoiceKind": self.invoice_kind,
             "reasonNonIssueType": self.reason_non_issue_type,

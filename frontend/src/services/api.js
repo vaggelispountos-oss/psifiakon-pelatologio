@@ -285,6 +285,7 @@ export function createEntry({
   vehicleMovementPurpose,
   isDiffVehPickupLocation,
   vehiclePickupLocation,
+  rentalExpectedDays,
 }) {
   return request("/api/dcl/entry", {
     method: "POST",
@@ -298,6 +299,7 @@ export function createEntry({
       vehicleMovementPurpose,
       isDiffVehPickupLocation,
       vehiclePickupLocation,
+      rentalExpectedDays,
     },
   });
 }

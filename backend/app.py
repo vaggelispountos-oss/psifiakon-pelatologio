@@ -16,7 +16,7 @@ import json
 import re
 import threading
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import requests
 from flask import Flask, current_app, g, jsonify, request
@@ -694,6 +694,20 @@ def register_routes(app):
             is_diff_pickup = bool(data.get("isDiffVehPickupLocation"))
             pickup_location = (data.get("vehiclePickupLocation") or "").strip() or None
 
+        # --- Ενοικιάσεις: πόσες μέρες (προαιρετικό, ΔΕΝ πάει στην ΑΑΔΕ) ---
+        # Χρησιμοποιείται μόνο τοπικά για να ειδοποιήσουμε αν καθυστερεί η
+        # επιστροφή του οχήματος (δες DclEntry.is_overdue). Δεν είναι
+        # υποχρεωτικό — αν δεν δοθεί, δεν γίνεται κανένας έλεγχος.
+        rental_days = None
+        expected_return_at = None
+        if is_rental:
+            raw_days = data.get("rentalExpectedDays")
+            if raw_days not in (None, ""):
+                rental_days = _parse_int(raw_days, "rentalExpectedDays")
+                if rental_days <= 0:
+                    raise ApiError("Το 'rentalExpectedDays' πρέπει να είναι θετικός αριθμός.")
+                expected_return_at = utcnow() + timedelta(days=rental_days)
+
         # Δημιουργία ή εύρεση πελάτη με βάση την πινακίδα (μέσα στο workshop)
         customer = Customer.query.filter_by(
             plate=plate, workshop_id=g.workshop_id
@@ -730,6 +744,8 @@ def register_routes(app):
             vehicle_movement_purpose=movement_purpose,
             is_diff_pickup_location=is_diff_pickup,
             vehicle_pickup_location=pickup_location,
+            rental_expected_days=rental_days,
+            expected_return_at=expected_return_at,
         )
         db.session.add(entry)
         db.session.flush()  # για να πάρουμε entry.id για το log

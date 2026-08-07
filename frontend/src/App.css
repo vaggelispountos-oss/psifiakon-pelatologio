@@ -735,6 +735,39 @@ textarea.input {
   color: #fff;
   border-color: var(--primary);
 }
+
+/* Rental vehicle picker — λίστα διαθέσιμων οχημάτων (κλικ αντί για dropdown) */
+.vehicle-picker-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+.vehicle-pick-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: 10px;
+  cursor: pointer;
+  min-width: 110px;
+  text-align: left;
+}
+.vehicle-pick-btn-active {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+.vehicle-pick-btn-active .mono,
+.vehicle-pick-btn-active .muted {
+  color: #fff;
+}
+.vehicle-pick-btn-disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
 .entry-recon {
   margin-top: 4px;
 }

@@ -378,7 +378,11 @@ function AuthenticatedApp({ workshop, onLogout, onWorkshopUpdated }) {
         );
       }
       return isRental ? (
-        <RentalVehiclePicker onConfirm={handleCreateEntry} disabled={busy} />
+        <RentalVehiclePicker
+          onConfirm={handleCreateEntry}
+          disabled={busy}
+          entries={entries}
+        />
       ) : (
         <CameraCapture onConfirm={handleCreateEntry} disabled={busy} isRental={isRental} />
       );
