@@ -26,7 +26,17 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from auth import init_auth, require_auth
 from config import Config, validate_production_config
-from models import AadeLog, Customer, DclEntry, OcrMetric, Settings, Workshop, db, utcnow
+from models import (
+    AadeLog,
+    Customer,
+    DclEntry,
+    FleetVehicle,
+    OcrMetric,
+    Settings,
+    Workshop,
+    db,
+    utcnow,
+)
 
 # --------------------------------------------------------------------
 # Επιλογή υπηρεσίας ΑΑΔΕ (mock ή πραγματική).
@@ -458,6 +468,83 @@ def register_routes(app):
         return jsonify(customer.to_dict())
 
     # ----------------------------------------------------------------
+    # Στόλος οχημάτων (μόνο Ενοικιάσεις) — οι ΜΟΝΕΣ πινακίδες που επιτρέπεται
+    # να επιλεγούν κατά τη δημιουργία νέας ενοικίασης (δες create_entry).
+    # ----------------------------------------------------------------
+    @app.route("/api/fleet-vehicles", methods=["GET"])
+    @require_auth
+    def list_fleet_vehicles():
+        vehicles = (
+            FleetVehicle.query.filter_by(workshop_id=g.workshop_id)
+            .order_by(FleetVehicle.plate.asc())
+            .all()
+        )
+        return jsonify([v.to_dict() for v in vehicles])
+
+    @app.route("/api/fleet-vehicles", methods=["POST"])
+    @require_auth
+    def create_fleet_vehicle():
+        data = request.get_json(silent=True) or {}
+        plate = _canonical_plate((data.get("plate") or "").strip())
+        if not plate:
+            raise ApiError("Το πεδίο 'plate' (πινακίδα) είναι υποχρεωτικό.")
+
+        existing = FleetVehicle.query.filter_by(
+            workshop_id=g.workshop_id, plate=plate
+        ).first()
+        if existing is not None:
+            raise ApiError("Η πινακίδα υπάρχει ήδη στον στόλο.")
+
+        vehicle = FleetVehicle(
+            workshop_id=g.workshop_id,
+            plate=plate,
+            label=(data.get("label") or "").strip() or None,
+        )
+        db.session.add(vehicle)
+        db.session.commit()
+        return jsonify(vehicle.to_dict()), 201
+
+    @app.route("/api/fleet-vehicles/<int:vehicle_id>", methods=["PATCH"])
+    @require_auth
+    def update_fleet_vehicle(vehicle_id):
+        vehicle = FleetVehicle.query.filter_by(
+            id=vehicle_id, workshop_id=g.workshop_id
+        ).first()
+        if vehicle is None:
+            raise ApiError("Δεν βρέθηκε το όχημα.", 404)
+
+        data = request.get_json(silent=True) or {}
+        if "plate" in data:
+            plate = _canonical_plate((data.get("plate") or "").strip())
+            if not plate:
+                raise ApiError("Το πεδίο 'plate' (πινακίδα) είναι υποχρεωτικό.")
+            dup = FleetVehicle.query.filter(
+                FleetVehicle.workshop_id == g.workshop_id,
+                FleetVehicle.plate == plate,
+                FleetVehicle.id != vehicle_id,
+            ).first()
+            if dup is not None:
+                raise ApiError("Η πινακίδα υπάρχει ήδη στον στόλο.")
+            vehicle.plate = plate
+        if "label" in data:
+            vehicle.label = (data.get("label") or "").strip() or None
+
+        db.session.commit()
+        return jsonify(vehicle.to_dict())
+
+    @app.route("/api/fleet-vehicles/<int:vehicle_id>", methods=["DELETE"])
+    @require_auth
+    def delete_fleet_vehicle(vehicle_id):
+        vehicle = FleetVehicle.query.filter_by(
+            id=vehicle_id, workshop_id=g.workshop_id
+        ).first()
+        if vehicle is None:
+            raise ApiError("Δεν βρέθηκε το όχημα.", 404)
+        db.session.delete(vehicle)
+        db.session.commit()
+        return "", 204
+
+    # ----------------------------------------------------------------
     # Λογαριασμός — εξαγωγή δεδομένων (portability) / διαγραφή (erasure)
     # ----------------------------------------------------------------
     @app.route("/api/account/export", methods=["GET"])
@@ -581,6 +668,17 @@ def register_routes(app):
 
         if not plate:
             raise ApiError("Το πεδίο 'plate' (πινακίδα) είναι υποχρεωτικό.")
+
+        # --- Ενοικιάσεις: επιτρέπονται ΜΟΝΟ πινακίδες του δηλωμένου στόλου ---
+        if is_rental:
+            in_fleet = FleetVehicle.query.filter_by(
+                workshop_id=g.workshop_id, plate=plate
+            ).first()
+            if in_fleet is None:
+                raise ApiError(
+                    "Η πινακίδα δεν ανήκει στον στόλο οχημάτων. Πρόσθεσέ την πρώτα "
+                    "από το tab «Οχήματα»."
+                )
 
         # --- Ενοικιάσεις: Σκοπός Κίνησης Οχήματος υποχρεωτικός στον 1ο Χρόνο ---
         movement_purpose = None
@@ -779,16 +877,19 @@ def register_routes(app):
 
         if invoice_kind is not None:
             entry.invoice_kind = _parse_int(invoice_kind, "invoiceKind")
+        if reason_non_issue is not None:
+            entry.reason_non_issue_type = _parse_int(reason_non_issue, "reasonNonIssueType")
 
-        # --- Ενοικιάσεις: Συμφωνηθέν Ποσό + (προαιρετικά) τόπος επιστροφής ---
+        # --- Ενοικιάσεις: Συμφωνηθέν Ποσό (προαιρετικό ανά ΑΑΔΕ spec — π.χ.
+        # Ιδιόχρηση/Δωρεάν Υπηρεσία δεν έχουν συμφωνηθέν ποσό) + (προαιρετικά)
+        # τόπος επιστροφής ---
         if is_rental:
             amount = data.get("amount")
-            if amount is None:
-                raise ApiError("Το πεδίο 'amount' (Συμφωνηθέν Ποσό) είναι υποχρεωτικό για Ενοικιάσεις.")
-            try:
-                entry.amount = float(amount)
-            except (TypeError, ValueError):
-                raise ApiError("Το πεδίο 'amount' πρέπει να είναι αριθμός.")
+            if amount is not None and str(amount).strip() != "":
+                try:
+                    entry.amount = float(amount)
+                except (TypeError, ValueError):
+                    raise ApiError("Το πεδίο 'amount' πρέπει να είναι αριθμός.")
             entry.is_diff_return_location = bool(data.get("isDiffVehReturnLocation"))
             entry.vehicle_return_location = (data.get("vehicleReturnLocation") or "").strip() or None
 
@@ -1132,6 +1233,8 @@ def register_routes(app):
                 "providedServiceCategory": entry.provided_service_category,
                 "providedServiceCategoryOther": entry.provided_service_category_other,
             }
+            if entry.provided_service_category in (4, 6, 9):
+                aade_payload["nonIssueInvoice"] = True
             result = aade.update_client(entry.id_dcl, aade_payload)
             method = "UpdateClient"
         elif action == "exit":
@@ -1146,6 +1249,9 @@ def register_routes(app):
             else:
                 aade_payload["providedServiceCategory"] = entry.provided_service_category
                 aade_payload["providedServiceCategoryOther"] = entry.provided_service_category_other
+            if entry.reason_non_issue_type is not None:
+                aade_payload["reasonNonIssueType"] = entry.reason_non_issue_type
+                aade_payload["nonIssueInvoice"] = True
             result = aade.update_client(entry.id_dcl, aade_payload)
             method = "UpdateClient"
         else:  # "correlate"

@@ -404,6 +404,29 @@ export function updateCustomer(id, { name, vat, phone }) {
   });
 }
 
+// ---- Στόλος οχημάτων (μόνο Ενοικιάσεις) ----
+export function getFleetVehicles() {
+  return request("/api/fleet-vehicles");
+}
+
+export function createFleetVehicle({ plate, label }) {
+  return request("/api/fleet-vehicles", {
+    method: "POST",
+    body: { plate, label },
+  });
+}
+
+export function updateFleetVehicle(id, { plate, label }) {
+  return request(`/api/fleet-vehicles/${id}`, {
+    method: "PATCH",
+    body: { plate, label },
+  });
+}
+
+export function deleteFleetVehicle(id) {
+  return request(`/api/fleet-vehicles/${id}`, { method: "DELETE" });
+}
+
 // ---- Λίστα / λεπτομέρειες ----
 export function getEntries() {
   return request("/api/dcl/entries");

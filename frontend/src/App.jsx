@@ -22,11 +22,13 @@ import {
 } from "./services/api";
 import { STATUS_LABELS, STATUS_LABELS_RENTAL } from "./constants";
 import CameraCapture from "./components/CameraCapture";
+import RentalVehiclePicker from "./components/RentalVehiclePicker";
 import ServiceForm from "./components/ServiceForm";
 import ExitForm from "./components/ExitForm";
 import QrScanner from "./components/QrScanner";
 import EntriesList from "./components/EntriesList";
 import CustomerDatabase from "./components/CustomerDatabase";
+import FleetVehicles from "./components/FleetVehicles";
 import HistoryLog from "./components/HistoryLog";
 import OcrStats from "./components/OcrStats";
 import { SettingsAccordion } from "./components/SettingsPanel";
@@ -53,6 +55,12 @@ const TABS = [
     id: "history",
     label: "Ιστορικό",
     hint: "Χρονολογικό αρχείο + αναλυτικές κλήσεις ΑΑΔΕ ανά επίσκεψη",
+  },
+  {
+    id: "fleet",
+    label: "Οχήματα",
+    hint: "Ο στόλος σου — μόνο αυτές τις πινακίδες μπορείς να ενοικιάσεις",
+    rentalOnly: true,
   },
   { id: "settings", label: "Ρυθμίσεις" },
 ];
@@ -182,19 +190,24 @@ function AuthenticatedApp({ workshop, onLogout, onWorkshopUpdated }) {
   }, []);
 
   const visibleTabs = useMemo(() => {
-    if (!devMode) return TABS;
-    const withoutSettings = TABS.filter((t) => t.id !== "settings");
-    const settingsTab = TABS.find((t) => t.id === "settings");
-    return [...withoutSettings, ...HIDDEN_TABS, settingsTab];
-  }, [devMode]);
+    const base = TABS.filter((t) => !t.rentalOnly || isRental);
+    if (!devMode) return base;
+    const withoutSettings = base.filter((t) => t.id !== "settings");
+    const settingsTab = base.find((t) => t.id === "settings");
+    const hiddenTabs = isRental ? [] : HIDDEN_TABS;
+    return [...withoutSettings, ...hiddenTabs, settingsTab];
+  }, [devMode, isRental]);
 
   // Αν ο χρήστης απενεργοποιήσει το dev mode ενώ βρίσκεται σε κρυφό tab,
   // γύρνα τον σε ασφαλές έδαφος (το tab δεν θα υπάρχει πια στο μενού).
   useEffect(() => {
-    if (!devMode && HIDDEN_TABS.some((t) => t.id === tab)) {
+    if (
+      (!devMode || isRental) &&
+      HIDDEN_TABS.some((t) => t.id === tab)
+    ) {
       setTab("flow");
     }
-  }, [devMode, tab]);
+  }, [devMode, isRental, tab]);
 
   const firstDevModeRender = useRef(true);
   useEffect(() => {
@@ -364,12 +377,10 @@ function AuthenticatedApp({ workshop, onLogout, onWorkshopUpdated }) {
           </div>
         );
       }
-      return (
-        <CameraCapture
-          onConfirm={handleCreateEntry}
-          disabled={busy}
-          isRental={isRental}
-        />
+      return isRental ? (
+        <RentalVehiclePicker onConfirm={handleCreateEntry} disabled={busy} />
+      ) : (
+        <CameraCapture onConfirm={handleCreateEntry} disabled={busy} isRental={isRental} />
       );
     }
 
@@ -528,6 +539,7 @@ function AuthenticatedApp({ workshop, onLogout, onWorkshopUpdated }) {
         {tab === "history" && (
           <HistoryLog entries={entries} loading={loading} onRefresh={refresh} />
         )}
+        {tab === "fleet" && isRental && <FleetVehicles />}
         {tab === "ocr-stats" && <OcrStats />}
         {tab === "settings" && (
           <SettingsAccordion

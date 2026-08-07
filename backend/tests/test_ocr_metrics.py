@@ -37,6 +37,8 @@ def auth_headers(c):
                 "name": "OCR Metrics Test Workshop",
                 "email": TEST_EMAIL,
                 "password": TEST_PASSWORD,
+                "businessType": "garage",
+                "termsAccepted": True,
             },
         )
     token = res.get_json()["accessToken"]

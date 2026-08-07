@@ -18,18 +18,16 @@ export default function ExitForm({ onSubmit, disabled, isRental }) {
     e.preventDefault();
     setError("");
 
-    if (isRental && !amount.trim()) {
-      setError("Το Συμφωνηθέν Ποσό είναι υποχρεωτικό.");
-      return;
-    }
     if (isRental && diffReturnLocation && !returnLocation.trim()) {
       setError("Συμπλήρωσε τον τόπο επιστροφής.");
       return;
     }
 
+    // Προαιρετικό ανά ΑΑΔΕ spec — π.χ. σε Ιδιόχρηση/Δωρεάν Υπηρεσία δεν
+    // υπάρχει συμφωνηθέν ποσό να δηλωθεί.
     const rentalExtra = isRental
       ? {
-          amount: Number(amount),
+          amount: amount.trim() ? Number(amount) : null,
           isDiffVehReturnLocation: diffReturnLocation,
           vehicleReturnLocation: diffReturnLocation ? returnLocation.trim() : null,
         }
@@ -57,7 +55,7 @@ export default function ExitForm({ onSubmit, disabled, isRental }) {
       <h2>{isRental ? "2ος Χρόνος — Ολοκλήρωση Ενοικίασης" : "3ος Χρόνος — Ολοκλήρωση"}</h2>
       <p className="muted">
         {isRental
-          ? "Συμπλήρωσε το συμφωνηθέν ποσό και το είδος παραστατικού για να ολοκληρωθεί η ενοικίαση."
+          ? "Επίλεξε είδος παραστατικού (ή «Δεν εκδίδεται παραστατικό» για Ιδιόχρηση/Δωρεάν Υπηρεσία) για να ολοκληρωθεί η ενοικίαση."
           : "Επίλεξε το είδος παραστατικού και ολοκλήρωσε την εργασία."}{" "}
         Η ΑΑΔΕ επιστρέφει την ώρα ολοκλήρωσης.
       </p>
@@ -65,7 +63,7 @@ export default function ExitForm({ onSubmit, disabled, isRental }) {
       {isRental && (
         <>
           <label className="field-label">
-            Συμφωνηθέν Ποσό (€):
+            Συμφωνηθέν Ποσό (€) — προαιρετικό:
             <input
               className="input"
               type="number"

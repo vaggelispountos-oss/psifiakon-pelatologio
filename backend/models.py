@@ -110,6 +110,32 @@ class Customer(db.Model):
         }
 
 
+class FleetVehicle(db.Model):
+    """Όχημα του στόλου ενός συνεργείου ενοικιάσεων — μόνο αυτές οι πινακίδες
+    επιτρέπεται να επιλεγούν κατά τη δημιουργία νέας ενοικίασης."""
+
+    __tablename__ = "fleet_vehicles"
+    __table_args__ = (
+        db.UniqueConstraint("workshop_id", "plate", name="uq_fleet_workshop_plate"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    workshop_id = db.Column(
+        db.Integer, db.ForeignKey("workshops.id"), nullable=False, index=True
+    )
+    plate = db.Column(db.String(20), nullable=False)
+    label = db.Column(db.String(100), nullable=True)  # π.χ. "Toyota Yaris λευκό"
+    created_at = db.Column(db.DateTime, default=utcnow)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "plate": self.plate,
+            "label": self.label,
+            "createdAt": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 class DclEntry(db.Model):
     """
     Μία εγγραφή Ψηφιακού Πελατολογίου (ΑΑΔΕ).
@@ -151,12 +177,15 @@ class DclEntry(db.Model):
     vehicle_pickup_location = db.Column(db.String(250), nullable=True)  # 1ος Χρόνος
     is_diff_return_location = db.Column(db.Boolean, nullable=True)  # 3ος Χρόνος
     vehicle_return_location = db.Column(db.String(250), nullable=True)  # 3ος Χρόνος
-    amount = db.Column(db.Float, nullable=True)  # 3ος Χρόνος — Συμφωνηθέν Ποσό
+    amount = db.Column(db.Float, nullable=True)  # 3ος Χρόνος — Συμφωνηθέν Ποσό (προαιρετικό ανά ΑΑΔΕ spec)
 
     # --- 3ος Χρόνος ---
     entry_completion = db.Column(db.Boolean, default=False, nullable=False)
     # 1=ΑΛΠ/ΑΠΥ, 2=Τιμολόγιο, 3=ΑΛΠ/ΑΠΥ-ΦΗΜ
     invoice_kind = db.Column(db.Integer, nullable=True)
+    # Εναλλακτικά του invoice_kind — 1=Δωρεάν Υπηρεσία, 2=Ιδιόχρηση,
+    # 3=Αποζημίωση Εγγύησης. Όταν οριστεί, ΔΕΝ εκδίδεται παραστατικό.
+    reason_non_issue_type = db.Column(db.Integer, nullable=True)
 
     # Ημερομηνίες που ΒΑΖΕΙ Η ΑΑΔΕ
     creation_date_time = db.Column(db.DateTime, nullable=True)  # 1ος Χρόνος
@@ -200,10 +229,17 @@ class DclEntry(db.Model):
         if not is_rental and self.status == "open" and self.provided_service_category is not None:
             return "service"
         if is_rental and self.status == "open" and (
-            self.invoice_kind is not None or self.amount is not None
+            self.invoice_kind is not None
+            or self.reason_non_issue_type is not None
+            or self.amount is not None
         ) and not self.entry_completion:
             return "exit"
-        if not is_rental and self.status == "in_progress" and self.invoice_kind is not None and not self.entry_completion:
+        if (
+            not is_rental
+            and self.status == "in_progress"
+            and (self.invoice_kind is not None or self.reason_non_issue_type is not None)
+            and not self.entry_completion
+        ):
             return "exit"
         if self.status == "completed" and self.mark is not None and self.correlate_id is None:
             return "correlate"
@@ -227,6 +263,7 @@ class DclEntry(db.Model):
             "amount": self.amount,
             "entryCompletion": self.entry_completion,
             "invoiceKind": self.invoice_kind,
+            "reasonNonIssueType": self.reason_non_issue_type,
             "creationDateTime": self.creation_date_time.isoformat()
             if self.creation_date_time
             else None,
