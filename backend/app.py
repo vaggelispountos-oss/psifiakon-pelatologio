@@ -118,8 +118,14 @@ def create_app():
 # Βοηθητικές συναρτήσεις
 # --------------------------------------------------------------------
 def _log_aade(entry_id, method, request_payload, response_payload, success):
-    """Καταγραφή κλήσης ΑΑΔΕ στο audit log."""
+    """
+    Καταγραφή κλήσης ΑΑΔΕ στο audit log. Καλείται ΠΑΝΤΑ μέσα σε
+    authenticated request (g.workshop_id υπάρχει ήδη) — ακόμα και τα logs
+    χωρίς dcl_entry_id (π.χ. «Έλεγχος σύνδεσης») ανήκουν σε συγκεκριμένο
+    συνεργείο, γι' αυτό γράφεται εδώ ρητά αντί να μένει None.
+    """
     log = AadeLog(
+        workshop_id=g.workshop_id,
         dcl_entry_id=entry_id,
         method=method,
         request_json=json.dumps(request_payload, ensure_ascii=False),
@@ -877,13 +883,11 @@ def register_routes(app):
         OcrMetric.query.filter_by(workshop_id=g.workshop_id).delete()
         # Το delete() του query δεν ενεργοποιεί cascade στα relationships
         # (π.χ. DclEntry.logs -> AadeLog) — σβήνουμε ρητά τα AadeLog πρώτα.
-        entry_ids = [
-            e.id for e in DclEntry.query.filter_by(workshop_id=g.workshop_id).all()
-        ]
-        if entry_ids:
-            AadeLog.query.filter(AadeLog.dcl_entry_id.in_(entry_ids)).delete(
-                synchronize_session=False
-            )
+        # Filter ΑΠΕΥΘΕΙΑΣ με workshop_id (όχι μέσω entry_ids/dcl_entry_id):
+        # πιάνει ΚΑΙ τα system-level logs χωρίς dcl_entry_id (π.χ. «Έλεγχος
+        # σύνδεσης» στις Ρυθμίσεις) — παλιότερα αυτά επιβίωναν της
+        # διαγραφής λογαριασμού επ' αόριστον.
+        AadeLog.query.filter_by(workshop_id=g.workshop_id).delete()
         DclEntry.query.filter_by(workshop_id=g.workshop_id).delete()
         Settings.query.filter_by(workshop_id=g.workshop_id).delete()
         db.session.delete(workshop)

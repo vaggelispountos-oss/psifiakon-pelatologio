@@ -511,6 +511,15 @@ class AadeLog(db.Model):
     __tablename__ = "aade_logs"
 
     id = db.Column(db.Integer, primary_key=True)
+    # nullable=True: υπάρχουν ιστορικές γραμμές πριν από αυτή τη στήλη που
+    # δεν μπορούν να αναχθούν σε συγκεκριμένο συνεργείο (δες migration 0004).
+    # ΚΑΘΕ νέα γραμμή το γεμίζει πάντα (δες app._log_aade) — χωρίς αυτό, το
+    # /api/account DELETE δεν μπορούσε να σβήσει logs χωρίς dcl_entry_id
+    # (π.χ. από «Έλεγχος σύνδεσης» στις Ρυθμίσεις) -> ημιτελής GDPR
+    # διαγραφή + πίνακας που μεγαλώνει χωρίς όριο για σβησμένους λογαριασμούς.
+    workshop_id = db.Column(
+        db.Integer, db.ForeignKey("workshops.id"), nullable=True, index=True
+    )
     # nullable: επιτρέπει system-level logs χωρίς εγγραφή (π.χ. test-connection)
     dcl_entry_id = db.Column(
         db.Integer, db.ForeignKey("dcl_entries.id"), nullable=True
