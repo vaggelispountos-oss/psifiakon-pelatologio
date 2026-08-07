@@ -1,15 +1,33 @@
 // components/ServiceForm.jsx
 // 2ος Χρόνος — Επιλογή Κατηγορίας Παρεχόμενης Υπηρεσίας.
+// Οι πρώτες 3 κατηγορίες καλύπτουν σχεδόν όλες τις επισκέψεις — εμφανίζονται
+// ως μεγάλα πλήκτρα tap-to-select (ένα tap) αντί για dropdown (tap + scroll +
+// tap). Οι υπόλοιπες 4 (σπάνιες περιπτώσεις) κρύβονται πίσω από «Άλλη
+// περίπτωση» ώστε να μη ανταγωνίζονται οπτικά τις συνηθισμένες επιλογές.
 import { useState } from "react";
 import { SERVICE_CATEGORIES, SERVICE_CATEGORY_OTHER } from "../constants";
 
+const PRIMARY_VALUES = [1, 2, 3];
+const PRIMARY_CATEGORIES = SERVICE_CATEGORIES.filter((c) =>
+  PRIMARY_VALUES.includes(c.value)
+);
+const OTHER_CATEGORIES = SERVICE_CATEGORIES.filter(
+  (c) => !PRIMARY_VALUES.includes(c.value)
+);
+
 export default function ServiceForm({ onSubmit, disabled }) {
   const [category, setCategory] = useState("");
+  const [showOther, setShowOther] = useState(false);
   const [other, setOther] = useState("");
   const [comments, setComments] = useState("");
   const [error, setError] = useState("");
 
-  const isOther = Number(category) === SERVICE_CATEGORY_OTHER;
+  const isOtherText = Number(category) === SERVICE_CATEGORY_OTHER;
+
+  function selectCategory(value) {
+    setCategory(String(value));
+    setError("");
+  }
 
   function handleSubmit(e) {
     e.preventDefault();
@@ -19,39 +37,61 @@ export default function ServiceForm({ onSubmit, disabled }) {
       setError("Επίλεξε κατηγορία παρεχόμενης υπηρεσίας.");
       return;
     }
-    if (isOther && !other.trim()) {
+    if (isOtherText && !other.trim()) {
       setError("Για «Λοιπά» το πεδίο ελεύθερου κειμένου είναι υποχρεωτικό.");
       return;
     }
 
     onSubmit({
       providedServiceCategory: Number(category),
-      providedServiceCategoryOther: isOther ? other.trim() : null,
+      providedServiceCategoryOther: isOtherText ? other.trim() : null,
       comments: comments.trim() || null,
     });
   }
 
   return (
     <form className="card" onSubmit={handleSubmit}>
-      <h2>Κατηγορία εργασίας</h2>
+      <h2>Τι έγινε;</h2>
 
-      <label className="field-label">
-        Κατηγορία Παρεχόμενης Υπηρεσίας:
-        <select
-          className="input"
-          value={category}
-          onChange={(e) => setCategory(e.target.value)}
+      <div className="choice-list">
+        {PRIMARY_CATEGORIES.map((c) => (
+          <button
+            key={c.value}
+            type="button"
+            className={`choice-btn${category === String(c.value) ? " is-selected" : ""}`}
+            onClick={() => selectCategory(c.value)}
+            disabled={disabled}
+          >
+            {c.label}
+          </button>
+        ))}
+      </div>
+
+      {!showOther ? (
+        <button
+          type="button"
+          className="link-btn"
+          onClick={() => setShowOther(true)}
         >
-          <option value="">— Επίλεξε —</option>
-          {SERVICE_CATEGORIES.map((c) => (
-            <option key={c.value} value={c.value}>
-              {c.value} — {c.label}
-            </option>
+          ⌄ Άλλη περίπτωση
+        </button>
+      ) : (
+        <div className="choice-list">
+          {OTHER_CATEGORIES.map((c) => (
+            <button
+              key={c.value}
+              type="button"
+              className={`choice-btn${category === String(c.value) ? " is-selected" : ""}`}
+              onClick={() => selectCategory(c.value)}
+              disabled={disabled}
+            >
+              {c.label}
+            </button>
           ))}
-        </select>
-      </label>
+        </div>
+      )}
 
-      {isOther && (
+      {isOtherText && (
         <label className="field-label">
           Περιγραφή (Λοιπά) — υποχρεωτικό:
           <input
@@ -76,7 +116,7 @@ export default function ServiceForm({ onSubmit, disabled }) {
 
       {error && <div className="alert alert-error">{error}</div>}
 
-      <button className="btn btn-primary btn-block" disabled={disabled}>
+      <button className="btn btn-primary btn-block" disabled={disabled || !category}>
         Καταχώρηση εργασίας
       </button>
     </form>

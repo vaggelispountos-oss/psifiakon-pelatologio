@@ -110,6 +110,21 @@ body {
   color: #fff;
   border-color: var(--primary);
 }
+.tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  margin-left: 6px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  vertical-align: middle;
+}
 
 /* Content / cards */
 .content {
@@ -165,6 +180,89 @@ body {
   border-radius: 10px;
   color: var(--text);
   font-size: 1rem;
+}
+
+/* Μεγάλα πλήκτρα tap-to-select — αντικαθιστούν dropdowns όπου η επιλογή
+   είναι σχεδόν πάντα μία από λίγες γνωστές τιμές (π.χ. κατηγορία εργασίας). */
+.choice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0;
+}
+.choice-btn {
+  text-align: left;
+  padding: 14px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+.choice-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.choice-btn.is-selected {
+  border-color: var(--primary);
+  background: rgba(37, 99, 235, 0.18);
+  font-weight: 600;
+}
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--primary);
+  font-size: 0.85rem;
+  padding: 4px 0;
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+/* Segmented control — δύο ισοδύναμες, αμοιβαία αποκλειόμενες επιλογές. */
+.segmented {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  margin: 12px 0 4px;
+}
+.segmented-btn {
+  flex: 1;
+  padding: 10px;
+  border: none;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.segmented-btn.is-active {
+  background: var(--primary);
+  color: #fff;
+  font-weight: 600;
+}
+
+/* Radio group — 2-3 επιλογές δεν αξίζουν dropdown σε κινητό. */
+.radio-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0;
+}
+.radio-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 4px;
+  font-size: 0.9rem;
+  color: var(--text);
+  cursor: pointer;
+}
+.radio-option input[type="radio"] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--primary);
 }
 
 /* Πεδίο πινακίδας — μεγαλύτερο, μονοσπάτιο και κεντραρισμένο ώστε να
@@ -462,6 +560,49 @@ textarea.input {
 }
 .fab:active {
   transform: scale(0.94);
+}
+
+/* Rental «Σήμερα» panel — τι καθυστερεί / τι γυρνάει σήμερα, πρώτο πράγμα
+   που βλέπει ο χρήστης όταν ανοίγει την εφαρμογή. */
+.today-panel-title {
+  margin: 0 0 8px;
+  font-size: 0.92rem;
+  color: var(--text);
+}
+.today-panel-title-danger {
+  color: #f87171;
+}
+.today-panel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+.today-panel-list:last-of-type {
+  margin-bottom: 8px;
+}
+.today-panel-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+.today-panel-row-danger {
+  border-color: rgba(248, 113, 113, 0.4);
+  background: rgba(220, 38, 38, 0.1);
+}
+.today-panel-days {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.today-panel-footer {
+  margin: 0;
 }
 
 /* Stepper — δείχνει σε ποιο βήμα βρίσκεται η ενεργή εγγραφή, χωρίς να

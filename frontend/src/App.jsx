@@ -23,6 +23,7 @@ import {
 import { STATUS_LABELS, STATUS_LABELS_RENTAL } from "./constants";
 import CameraCapture from "./components/CameraCapture";
 import Stepper from "./components/Stepper";
+import RentalTodayPanel from "./components/RentalTodayPanel";
 import RentalVehiclePicker from "./components/RentalVehiclePicker";
 import ServiceForm from "./components/ServiceForm";
 import ExitForm from "./components/ExitForm";
@@ -181,6 +182,14 @@ function AuthenticatedApp({ workshop, onLogout, onWorkshopUpdated }) {
   const activeEntry = useMemo(
     () => entries.find((e) => e.id === activeEntryId) || null,
     [entries, activeEntryId]
+  );
+
+  // Πόσα ενοικιαζόμενα οχήματα καθυστερούν να επιστραφούν — δείχνεται ως
+  // κόκκινο badge πάνω στο tab «Λειτουργία» ώστε να μη χρειάζεται να το
+  // ανοίξεις για να ξέρεις ότι κάτι εκκρεμεί.
+  const overdueCount = useMemo(
+    () => (isRental ? entries.filter((e) => e.isOverdue).length : 0),
+    [entries, isRental]
   );
 
   const notify = useCallback((type, text) => {
@@ -368,26 +377,37 @@ function AuthenticatedApp({ workshop, onLogout, onWorkshopUpdated }) {
 
   function renderStage() {
     if (!activeEntry) {
+      // Πρώτο πράγμα που βλέπει ο χρήστης rental κάθε φορά που ανοίγει την
+      // εφαρμογή: τι καθυστερεί / τι γυρνάει σήμερα. Ανεξάρτητο από τους
+      // κωδικούς ΑΑΔΕ — είναι απλή ανάγνωση, όχι δημιουργία εγγραφής.
+      const todayPanel = isRental && (
+        <RentalTodayPanel entries={entries} onAct={handleActOnEntry} />
+      );
+
       // Μπλοκάρισμα «Νέας εγγραφής» χωρίς κωδικούς ΑΑΔΕ
       if (hasKey === false) {
         return (
-          <div className="card">
-            <h2>Απαιτούνται κωδικοί ΑΑΔΕ</h2>
-            <div className="alert alert-error">
-              ⚠️ Δεν έχουν οριστεί οι κωδικοί ΑΑΔΕ. Για να δημιουργήσεις εγγραφή,
-              συμπλήρωσέ τους πρώτα στις Ρυθμίσεις.
+          <>
+            {todayPanel}
+            <div className="card">
+              <h2>Απαιτούνται κωδικοί ΑΑΔΕ</h2>
+              <div className="alert alert-error">
+                ⚠️ Δεν έχουν οριστεί οι κωδικοί ΑΑΔΕ. Για να δημιουργήσεις εγγραφή,
+                συμπλήρωσέ τους πρώτα στις Ρυθμίσεις.
+              </div>
+              <button
+                className="btn btn-primary btn-block"
+                onClick={() => setTab("settings")}
+              >
+                ⚙️ Μετάβαση στις Ρυθμίσεις
+              </button>
             </div>
-            <button
-              className="btn btn-primary btn-block"
-              onClick={() => setTab("settings")}
-            >
-              ⚙️ Μετάβαση στις Ρυθμίσεις
-            </button>
-          </div>
+          </>
         );
       }
       return (
         <>
+          {todayPanel}
           <Stepper status={null} isRental={isRental} />
           {isRental ? (
             <RentalVehiclePicker
@@ -516,6 +536,9 @@ function AuthenticatedApp({ workshop, onLogout, onWorkshopUpdated }) {
             title={t.hint}
           >
             {t.label}
+            {t.id === "flow" && overdueCount > 0 && (
+              <span className="tab-badge">{overdueCount}</span>
+            )}
           </button>
         ))}
       </nav>

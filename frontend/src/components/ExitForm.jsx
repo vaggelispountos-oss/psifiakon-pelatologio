@@ -2,6 +2,8 @@
 // 3ος Χρόνος — Ολοκλήρωση (Είδος Παραστατικού) -> entryCompletion.
 // Εναλλακτικά του invoiceKind, ο χρήστης μπορεί να δηλώσει ότι ΔΕΝ εκδόθηκε
 // παραστατικό (reasonNonIssueType) — π.χ. εργασία εγγύησης χωρίς χρέωση.
+// Segmented control αντί για checkbox: το checkbox άλλαζε ΕΝΑ ΑΛΛΟ πεδίο
+// (το dropdown από κάτω), κάτι απρόβλεπτο — εδώ η επιλογή είναι ρητή.
 import { useState } from "react";
 import { INVOICE_KINDS, REASON_NON_ISSUE_TYPES } from "../constants";
 
@@ -99,50 +101,59 @@ export default function ExitForm({ onSubmit, disabled, isRental }) {
         </>
       )}
 
-      <label className="field-label field-checkbox">
-        <input
-          type="checkbox"
-          checked={noInvoice}
-          onChange={(e) => {
-            setNoInvoice(e.target.checked);
+      <div className="segmented" role="tablist" aria-label="Παραστατικό">
+        <button
+          type="button"
+          className={`segmented-btn${!noInvoice ? " is-active" : ""}`}
+          onClick={() => {
+            setNoInvoice(false);
             setError("");
           }}
-        />
-        Δεν εκδίδεται παραστατικό
-      </label>
+        >
+          Εκδόθηκε
+        </button>
+        <button
+          type="button"
+          className={`segmented-btn${noInvoice ? " is-active" : ""}`}
+          onClick={() => {
+            setNoInvoice(true);
+            setError("");
+          }}
+        >
+          Δεν εκδίδεται
+        </button>
+      </div>
 
       {noInvoice ? (
-        <label className="field-label">
-          Αιτιολογία Μη Έκδοσης:
-          <select
-            className="input"
-            value={reasonNonIssueType}
-            onChange={(e) => setReasonNonIssueType(e.target.value)}
-          >
-            <option value="">— Επίλεξε —</option>
-            {REASON_NON_ISSUE_TYPES.map((r) => (
-              <option key={r.value} value={r.value}>
-                {r.value} — {r.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="radio-list">
+          {REASON_NON_ISSUE_TYPES.map((r) => (
+            <label key={r.value} className="radio-option">
+              <input
+                type="radio"
+                name="reasonNonIssueType"
+                value={r.value}
+                checked={reasonNonIssueType === String(r.value)}
+                onChange={(e) => setReasonNonIssueType(e.target.value)}
+              />
+              {r.label}
+            </label>
+          ))}
+        </div>
       ) : (
-        <label className="field-label">
-          Είδος Παραστατικού:
-          <select
-            className="input"
-            value={invoiceKind}
-            onChange={(e) => setInvoiceKind(e.target.value)}
-          >
-            <option value="">— Επίλεξε —</option>
-            {INVOICE_KINDS.map((k) => (
-              <option key={k.value} value={k.value}>
-                {k.value} — {k.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="radio-list">
+          {INVOICE_KINDS.map((k) => (
+            <label key={k.value} className="radio-option">
+              <input
+                type="radio"
+                name="invoiceKind"
+                value={k.value}
+                checked={invoiceKind === String(k.value)}
+                onChange={(e) => setInvoiceKind(e.target.value)}
+              />
+              {k.label}
+            </label>
+          ))}
+        </div>
       )}
 
       {error && <div className="alert alert-error">{error}</div>}
