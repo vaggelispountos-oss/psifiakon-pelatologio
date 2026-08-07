@@ -16,6 +16,10 @@ lxml>=5.0
 requests>=2.31
 # Κρυπτογράφηση aade_subscription_key στη βάση (crypto.py)
 cryptography>=42.0
+# Error tracking (production) — δες config.SENTRY_DSN. Χωρίς αυτό, bugs σε
+# production φαίνονται ΜΟΝΟ αν ψάξεις χειροκίνητα τα Render logs (δες πόσο
+# αργά εντοπίστηκε το aade_state bug σήμερα, χωρίς αυτό).
+sentry-sdk[flask]>=2.0
 # Migrations βάσης (αντικαθιστά το χειροκίνητο _add_missing_columns) — δες
 # migrations/README.md για το γιατί.
 alembic>=1.13

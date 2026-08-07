@@ -129,6 +129,13 @@ class Config:
     # ΜΗΝ το αφήνεις έτσι πέρα από τοπική δοκιμή.
     ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", "").strip()
 
+    # --- Error tracking (Sentry, προαιρετικό) ---
+    # Κενό (default) = απενεργοποιημένο· καμία εξάρτηση/κόστος αν δεν
+    # ρυθμιστεί. Χωρίς αυτό, ένα production bug (π.χ. σφάλμα βάσης σε ένα
+    # endpoint) φαίνεται ΜΟΝΟ αν ψάξεις χειροκίνητα τα Render logs — και
+    # μόνο αν ξέρεις τι ψάχνεις και πότε συνέβη.
+    SENTRY_DSN = os.getenv("SENTRY_DSN", "").strip()
+
     # --- Telemetry OCR (προαιρετικό) ---
     # Αν TELEMETRY_URL οριστεί, ΚΑΘΕ μετρική OCR (κάθε σάρωση πινακίδας)
     # προωθείται ΚΑΙ σε αυτό το URL — τυπικά τον δικό σου κεντρικό server

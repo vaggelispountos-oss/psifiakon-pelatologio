@@ -48,7 +48,28 @@ from models import (
 from mock_aade import MockAadeService
 
 
+def _init_sentry():
+    """
+    Ενεργοποιεί το Sentry ΜΟΝΟ αν έχει οριστεί SENTRY_DSN (δες config.py) —
+    χωρίς αυτό, καμία κλήση δικτύου, καμία εξάρτηση σε λειτουργία. Καλείται
+    πριν το Flask app instance ώστε να πιάνει και σφάλματα στο ίδιο το
+    create_app() (π.χ. στο validate_production_config).
+    """
+    if not Config.SENTRY_DSN:
+        return
+    import sentry_sdk
+    from sentry_sdk.integrations.flask import FlaskIntegration
+
+    sentry_sdk.init(
+        dsn=Config.SENTRY_DSN,
+        environment=Config.FLASK_ENV,
+        integrations=[FlaskIntegration()],
+    )
+
+
 def create_app():
+    _init_sentry()
+
     app = Flask(__name__)
     app.config.from_object(Config)
 
