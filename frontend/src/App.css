@@ -482,6 +482,18 @@ textarea.input {
     transform: rotate(360deg);
   }
 }
+/* Spinner ΜΕΣΑ σε κουμπί (π.χ. «Άνοιγμα κάμερας…», «Εκκίνηση σαρωτή…»).
+   Το .btn δεν είναι flex container, οπότε χωρίς το vertical-align ο κύκλος
+   κάθεται στη baseline του κειμένου αντί να ευθυγραμμίζεται μαζί του.
+   currentColor: το βασικό .spinner έχει border-top σε --primary, που πάνω
+   σε μπλε .btn-primary θα ήταν αόρατο — έτσι παίρνει πάντα το χρώμα του
+   κειμένου του κουμπιού. */
+.btn .spinner {
+  vertical-align: -2px;
+  margin-right: 4px;
+  border-color: rgba(255, 255, 255, 0.35);
+  border-top-color: currentColor;
+}
 
 /* Οδηγός "τέλεια σάρωση -> πάτα εδώ κάτω" */
 .scan-success-hint {
@@ -557,6 +569,73 @@ textarea.input {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+/* Καθολική ένδειξη «τρέχει κλήση προς ΑΑΔΕ» (App.jsx, state `busy`).
+   ΠΑΝΩ και όχι κάτω: το .toast-float πιάνει ήδη το κάτω μέρος, και μια
+   κλήση ΑΑΔΕ συχνά τελειώνει ΜΕ toast — θα κάθονταν το ένα πάνω στο άλλο. */
+.busy-float {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 10px 12px;
+  padding-top: calc(10px + env(safe-area-inset-top, 0px));
+  background: var(--primary);
+  color: #fff;
+  font-size: 0.88rem;
+  font-weight: 600;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  animation: busy-in 0.18s ease-out;
+}
+/* Το .spinner είναι φτιαγμένο για σκούρο φόντο (border-top: --primary) —
+   πάνω στο μπλε της μπάρας θα ήταν αόρατο. */
+.busy-float .spinner {
+  border-color: rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  flex-shrink: 0;
+}
+@keyframes busy-in {
+  from {
+    opacity: 0;
+    transform: translateY(-100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Fallback UI του ErrorBoundary — δες components/ErrorBoundary.jsx */
+.error-boundary {
+  border-color: var(--danger);
+}
+.error-boundary-details {
+  margin-top: 12px;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.error-boundary-details summary {
+  cursor: pointer;
+  user-select: none;
+}
+.error-boundary-details pre {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  /* Ένα μεγάλο stack trace δεν πρέπει να σπρώχνει τη σελίδα σε οριζόντιο
+     scroll — τυλίγεται και σπάει σε μεγάλες λέξεις. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 220px;
+  overflow-y: auto;
 }
 
 /* FAB — ένα και μοναδικό σημείο εκκίνησης νέας εγγραφής σε όλη την εφαρμογή. */

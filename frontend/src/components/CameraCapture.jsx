@@ -254,6 +254,9 @@ export default function CameraCapture({ onConfirm, disabled, isRental }) {
   const [diffPickupLocation, setDiffPickupLocation] = useState(false);
   const [pickupLocation, setPickupLocation] = useState("");
   const [cameraOn, setCameraOn] = useState(false);
+  // Το getUserMedia κρατά αισθητά σε κινητό (άδεια χρήστη + άνοιγμα φακού) —
+  // χωρίς ένδειξη, το κουμπί έμοιαζε νεκρό και ο χρήστης το πατούσε ξανά.
+  const [cameraStarting, setCameraStarting] = useState(false);
   const [ocrRunning, setOcrRunning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [plate, setPlate] = useState("");
@@ -406,6 +409,7 @@ export default function CameraCapture({ onConfirm, disabled, isRental }) {
 
   async function startCamera() {
     setError("");
+    setCameraStarting(true);
     try {
       // Ζητάμε ΥΨΗΛΗ ανάλυση ρητά — χωρίς αυτό πολλά κινητά δίνουν default
       // 640x480, οπότε το crop του πλαισίου-οδηγού (~80% πλάτους πάνω σε μια
@@ -464,6 +468,10 @@ export default function CameraCapture({ onConfirm, disabled, isRental }) {
         "Δεν ήταν δυνατή η πρόσβαση στην κάμερα. Έλεγξε τα δικαιώματα. " +
           `(${err.message})`
       );
+    } finally {
+      // finally και όχι στο τέλος του try: αλλιώς μια άρνηση άδειας θα
+      // άφηνε το κουμπί κολλημένο στο «Άνοιγμα κάμερας…» για πάντα.
+      setCameraStarting(false);
     }
   }
 
@@ -806,9 +814,15 @@ export default function CameraCapture({ onConfirm, disabled, isRental }) {
               <button
                 className="btn btn-primary btn-lg"
                 onClick={startCamera}
-                disabled={disabled}
+                disabled={disabled || cameraStarting}
               >
-                📷 Άνοιγμα κάμερας
+                {cameraStarting ? (
+                  <>
+                    <span className="spinner" /> Άνοιγμα κάμερας…
+                  </>
+                ) : (
+                  "📷 Άνοιγμα κάμερας"
+                )}
               </button>
             ) : (
               <>

@@ -25,6 +25,7 @@ import {
 } from "./services/api";
 import { STATUS_LABELS, STATUS_LABELS_RENTAL } from "./constants";
 import CameraCapture from "./components/CameraCapture";
+import ErrorBoundary from "./components/ErrorBoundary";
 import Stepper from "./components/Stepper";
 import RentalTodayPanel from "./components/RentalTodayPanel";
 import RentalVehiclePicker from "./components/RentalVehiclePicker";
@@ -487,7 +488,14 @@ function AuthenticatedApp({ workshop, actor, onLogout, onWorkshopUpdated }) {
               entries={entries}
             />
           ) : (
-            <CameraCapture onConfirm={handleCreateEntry} disabled={busy} isRental={isRental} />
+            // Το CameraCapture είναι το πιο σύνθετο component της εφαρμογής
+            // (κάμερα, canvas, OCR, preprocessing) και ό,τι σκάσει εκεί
+            // ΔΕΝ πρέπει να ρίχνει όλη την εφαρμογή — ο χρήστης πρέπει να
+            // μπορεί τουλάχιστον να δει τις εγγραφές του και να καταχωρήσει
+            // πινακίδα χειροκίνητα.
+            <ErrorBoundary title="Πρόβλημα με την κάμερα ή την αναγνώριση">
+              <CameraCapture onConfirm={handleCreateEntry} disabled={busy} isRental={isRental} />
+            </ErrorBoundary>
           )}
         </>
       );
@@ -622,6 +630,21 @@ function AuthenticatedApp({ workshop, actor, onLogout, onWorkshopUpdated }) {
 
       {workshop?.emailVerified === false && (
         <VerifyEmailBanner email={workshop.email} />
+      )}
+
+      {/* ΕΝΑ σημείο για ΟΛΕΣ τις κλήσεις προς ΑΑΔΕ: και οι 4 Χρόνοι + η
+          ακύρωση περνούν από το ίδιο `busy`, οπότε δεν χρειάζεται spinner
+          σε κάθε φόρμα ξεχωριστά. Μέχρι τώρα το `busy` ΜΟΝΟ απενεργοποιούσε
+          κουμπιά — σε μια κλήση που κρατά έως ~60s (real_aade.py: 30s × 2
+          retries) ο χρήστης έβλεπε ένα γκρι κουμπί και τίποτα άλλο, και
+          νόμιζε ότι κόλλησε.
+          Πάνω-πάνω και ΟΧΙ κάτω, ώστε να μη συγκρούεται με το toast — και
+          τα δύο είναι position:fixed. */}
+      {busy && (
+        <div className="busy-float" role="status" aria-live="polite">
+          <span className="spinner" />
+          Επικοινωνία με ΑΑΔΕ… μην κλείσεις τη σελίδα.
+        </div>
       )}
 
       {toast && (

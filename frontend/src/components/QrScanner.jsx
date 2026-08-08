@@ -14,6 +14,9 @@ const REGION_ID = "qr-reader-region";
 export default function QrScanner({ onCorrelate, disabled, isRental }) {
   const scannerRef = useRef(null);
   const [scanning, setScanning] = useState(false);
+  // Το html5Qr.start() ζητά άδεια κάμερας και ανοίγει τον φακό — αισθητή
+  // καθυστέρηση σε κινητό, στην οποία το κουμπί έμοιαζε νεκρό.
+  const [starting, setStarting] = useState(false);
   const [mark, setMark] = useState("");
   const [rawQr, setRawQr] = useState("");
   const [error, setError] = useState("");
@@ -29,6 +32,7 @@ export default function QrScanner({ onCorrelate, disabled, isRental }) {
   async function startScan() {
     setError("");
     setInfo("");
+    setStarting(true);
     try {
       const html5Qr = new Html5Qrcode(REGION_ID);
       scannerRef.current = html5Qr;
@@ -46,6 +50,10 @@ export default function QrScanner({ onCorrelate, disabled, isRental }) {
         "Δεν ήταν δυνατή η εκκίνηση του σαρωτή QR. Έλεγξε τα δικαιώματα " +
           `κάμερας. (${err.message})`
       );
+    } finally {
+      // finally: μια άρνηση άδειας δεν πρέπει να αφήσει το κουμπί κολλημένο
+      // στο «Εκκίνηση…» για πάντα.
+      setStarting(false);
     }
   }
 
@@ -100,8 +108,18 @@ export default function QrScanner({ onCorrelate, disabled, isRental }) {
 
       <div className="btn-row">
         {!scanning ? (
-          <button className="btn" onClick={startScan} disabled={disabled}>
-            📷 Έναρξη σάρωσης QR
+          <button
+            className="btn"
+            onClick={startScan}
+            disabled={disabled || starting}
+          >
+            {starting ? (
+              <>
+                <span className="spinner" /> Εκκίνηση σαρωτή…
+              </>
+            ) : (
+              "📷 Έναρξη σάρωσης QR"
+            )}
           </button>
         ) : (
           <button className="btn btn-ghost" onClick={stopScan}>
