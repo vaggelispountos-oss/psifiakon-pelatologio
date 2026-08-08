@@ -1,0 +1,19 @@
+# ΚΡΙΣΙΜΟ: το .env περιέχει πραγματικά μυστικά (JWT_SECRET_KEY,
+# ENCRYPTION_KEY, RESEND_API_KEY...). Χωρίς αυτή τη γραμμή θα ψηνόταν ΜΕΣΑ
+# στο image — δηλαδή θα ταξίδευε σε όποιον πάρει το image.
+.env
+.env.*
+!.env.example
+
+# Τοπική SQLite βάση + backups — δεδομένα, δεν έχουν θέση σε image.
+instance/
+*.db
+*.db.bak*
+backups/
+
+__pycache__/
+*.pyc
+.pytest_cache/
+venv/
+.venv/
+.DS_Store

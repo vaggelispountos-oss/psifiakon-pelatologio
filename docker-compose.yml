@@ -1,0 +1,138 @@
+# docker-compose.yml
+# --------------------------------------------------------------------
+# Ολόκληρο το stack σε ΜΙΑ εντολή:
+#
+#     cp .env.example .env     # και συμπλήρωσε τα μυστικά (δες μέσα)
+#     docker compose up -d --build
+#     -> http://localhost:8080
+#
+# Αντικατοπτρίζει το production deployment του render.yaml (Postgres +
+# Redis + gunicorn με τα ίδια flags), ώστε ό,τι δοκιμάζεται εδώ να
+# συμπεριφέρεται όπως στο Render. Η ΜΟΝΗ ουσιαστική διαφορά: εδώ το nginx
+# σερβίρει το frontend ΚΑΙ κάνει proxy το /api, άρα ένα origin και μηδέν
+# CORS — στο Render/Vercel είναι δύο ξεχωριστά origins και το CORS το
+# ρυθμίζει το CORS_ORIGINS.
+# --------------------------------------------------------------------
+
+# Κοινό env για backend + migrate: πρέπει να βλέπουν ΤΗΝ ΙΔΙΑ βάση και τα
+# ίδια κλειδιά, αλλιώς τα migrations θα έτρεχαν σε άλλη βάση από την
+# εφαρμογή. Το YAML anchor κρατά τη μοναδική πηγή αλήθειας εδώ.
+x-backend-env: &backend-env
+  FLASK_ENV: production
+  DATABASE_URL: postgresql://dcl:${POSTGRES_PASSWORD:?όρισε POSTGRES_PASSWORD στο .env}@db:5432/dcl
+  REDIS_URL: redis://redis:6379
+
+  # Υποχρεωτικά σε production — το validate_production_config() στο
+  # config.py ΣΚΑΕΙ στην εκκίνηση αν λείπουν (σκόπιμα: καλύτερα να μη
+  # σηκωθεί καθόλου, παρά να τρέχει με ανασφαλή defaults).
+  JWT_SECRET_KEY: ${JWT_SECRET_KEY:?όρισε JWT_SECRET_KEY στο .env}
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY:?όρισε ENCRYPTION_KEY στο .env}
+  # Το origin απ' όπου σερβίρεται το frontend. Default το localhost:8080 του
+  # nginx παρακάτω· άλλαξέ το αν βάλεις πραγματικό domain.
+  CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+
+  ADMIN_KEY: ${ADMIN_KEY:-}
+  USE_MOCK_AADE: ${USE_MOCK_AADE:-true}
+  AADE_ENV: ${AADE_ENV:-dev}
+  AADE_BASE_URL: ${AADE_BASE_URL:-}
+  BRANCH_NUMBER: ${BRANCH_NUMBER:-0}
+  TRIAL_DAYS: ${TRIAL_DAYS:-14}
+
+  PLATE_RECOGNIZER_TOKEN: ${PLATE_RECOGNIZER_TOKEN:-}
+  PLATE_RECOGNIZER_REGIONS: ${PLATE_RECOGNIZER_REGIONS:-gr}
+
+  RESEND_API_KEY: ${RESEND_API_KEY:-}
+  RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-}
+  FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8080}
+
+  SENTRY_DSN: ${SENTRY_DSN:-}
+  TELEMETRY_URL: ${TELEMETRY_URL:-}
+  TELEMETRY_KEY: ${TELEMETRY_KEY:-}
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: dcl
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?όρισε POSTGRES_PASSWORD στο .env}
+      POSTGRES_DB: dcl
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    # Χωρίς healthcheck, το `depends_on` θα θεωρούσε τη βάση έτοιμη μόλις
+    # ΞΕΚΙΝΗΣΕΙ το container — όχι μόλις δεχτεί συνδέσεις. Το migrate θα
+    # έσκαγε με "connection refused" στο πρώτο `up`.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dcl -d dcl"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    # allkeys-lru: ίδια πολιτική με το render.yaml. Το Redis εδώ κρατά ΜΟΝΟ
+    # μετρητές rate-limit (Flask-Limiter) — αναλώσιμα, όχι δεδομένα πελατών.
+    command: ["redis-server", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  # One-shot service: τρέχει τα Alembic migrations ΜΙΑ φορά και τερματίζει.
+  #
+  # ΓΙΑΤΙ ΞΕΧΩΡΙΣΤΟ SERVICE και όχι entrypoint μέσα στο backend: το σχήμα
+  # της βάσης πρέπει να εφαρμοστεί ΜΙΑ φορά, ΠΡΙΝ σηκωθεί οποιοσδήποτε
+  # gunicorn worker (δες τα σχόλια στο app.py/render.yaml — δύο workers που
+  # τρέχουν το ΙΔΙΟ ALTER TABLE ταυτόχρονα έδιναν DuplicateColumn και crash
+  # loop). Στο Render αυτό το εγγυάται το buildCommand· εδώ το εγγυάται το
+  # service_completed_successfully παρακάτω, και συνεχίζει να ισχύει ακόμα
+  # κι αν κάποτε τρέξεις `docker compose up --scale backend=3`.
+  migrate:
+    build: ./backend
+    command: ["python", "scripts/migrate.py"]
+    environment: *backend-env
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  backend:
+    build: ./backend
+    environment: *backend-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Καμία δημοσίευση port: το backend είναι προσβάσιμο ΜΟΝΟ μέσω του nginx
+    # (internal network). Αν χρειαστείς απευθείας πρόσβαση για debugging,
+    # ξεσχολίασε — αλλά τότε το /api εκτίθεται χωρίς το nginx μπροστά.
+    # ports:
+    #   - "5001:5001"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Κενό = σχετικά /api/... μέσω του nginx proxy (δες nginx.conf).
+        # ΠΡΟΣΟΧΗ: build-time μεταβλητή — αλλαγή θέλει
+        # `docker compose build frontend`, όχι απλό restart.
+        VITE_API_URL: ${VITE_API_URL:-}
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  # Named volumes: τα δεδομένα επιβιώνουν από `docker compose down`.
+  # ΠΡΟΣΟΧΗ: το `docker compose down -v` ΤΑ ΣΒΗΝΕΙ — δες scripts/backup_db.sh.
+  db-data:
+  redis-data:

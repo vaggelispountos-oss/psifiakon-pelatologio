@@ -1,0 +1,10 @@
+# Το .env θα το διάβαζε το Vite στο build και θα μπορούσε να υπερισχύσει του
+# VITE_API_URL build arg (δες Dockerfile) — κράτα το εκτός του build context
+# ώστε το image να χτίζεται ΜΟΝΟ από ρητές τιμές.
+.env
+.env.*
+!.env.example
+
+node_modules
+dist
+.DS_Store
