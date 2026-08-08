@@ -9,7 +9,7 @@ test_aade_idempotency.py
 Τα τεστ εδώ καλύπτουν τις δύο διαδρομές που παράγουν διπλές εγγραφές:
 
   1) ΜΕΣΑ στο transport (real_aade._post_xml): retry μετά από read timeout.
-  2) ΜΕΣΑ στη ροή (app.resend_entry): «Επαναποστολή» εγγραφής που η ΑΑΔΕ
+  2) ΜΕΣΑ στη ροή (routes_dcl.resend_entry): «Επαναποστολή» εγγραφής που η ΑΑΔΕ
      έχει ήδη καταχωρήσει.
 
 Καμία πραγματική κλήση δικτύου — το HTTP layer γίνεται mock με `responses`,
@@ -26,7 +26,7 @@ import responses
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import app as app_module  # noqa: E402
+import aade_core  # noqa: E402
 from app import app  # noqa: E402
 from models import AadeLog, Customer, DclEntry, db  # noqa: E402
 from real_aade import EP_SEND, RealAadeService  # noqa: E402
@@ -270,7 +270,7 @@ def fake_aade(monkeypatch):
 
     def install(service):
         holder["svc"] = service
-        monkeypatch.setattr(app_module, "_build_aade", lambda settings: service)
+        monkeypatch.setattr(aade_core, "_build_aade", lambda settings: service)
         return service
 
     yield install
