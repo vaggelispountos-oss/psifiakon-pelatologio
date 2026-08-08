@@ -4,6 +4,7 @@
 // inline επεξεργασία. Το πλήθος επισκέψεων/τελευταία κατάσταση προκύπτουν από
 // τις εγγραφές πελατολογίου (entries prop), ήδη φορτωμένες στο App.
 import { useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCustomers, updateCustomer } from "../services/api";
 import { STATUS_LABELS } from "../constants";
 
@@ -88,35 +89,27 @@ function EditRow({ customer, onCancel, onSaved }) {
 }
 
 export default function CustomerDatabase({ entries, loading: entriesLoading, onRefresh }) {
-  const [customers, setCustomers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [editingId, setEditingId] = useState(null);
 
-  async function load(q) {
-    setLoading(true);
-    setError("");
-    try {
-      const data = await getCustomers(q);
-      setCustomers(Array.isArray(data) ? data : []);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
   useEffect(() => {
-    load("");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    const t = setTimeout(() => load(search), 300);
+    const t = setTimeout(() => setDebouncedSearch(search), 300);
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search]);
+
+  const customersQuery = useQuery({
+    queryKey: ["customers", debouncedSearch],
+    queryFn: () => getCustomers(debouncedSearch),
+    placeholderData: (prev) => prev,
+  });
+  const customers = customersQuery.data || [];
+  const loading = customersQuery.isFetching;
+  const error = customersQuery.error?.message || "";
+
+  const refreshCustomers = () =>
+    queryClient.invalidateQueries({ queryKey: ["customers"] });
 
   // Πλήθος επισκέψεων + τελευταία κατάσταση ανά πινακίδα, από τις entries.
   const statsByPlate = useMemo(() => {
@@ -132,7 +125,7 @@ export default function CustomerDatabase({ entries, loading: entriesLoading, onR
   }, [entries]);
 
   function handleRefresh() {
-    load(search);
+    refreshCustomers();
     onRefresh();
   }
 
@@ -192,10 +185,8 @@ export default function CustomerDatabase({ entries, loading: entriesLoading, onR
                       key={c.id}
                       customer={c}
                       onCancel={() => setEditingId(null)}
-                      onSaved={(updated) => {
-                        setCustomers((prev) =>
-                          prev.map((row) => (row.id === updated.id ? updated : row))
-                        );
+                      onSaved={() => {
+                        refreshCustomers();
                         setEditingId(null);
                       }}
                     />
