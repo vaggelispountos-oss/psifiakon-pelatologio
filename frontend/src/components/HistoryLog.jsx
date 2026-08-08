@@ -2,7 +2,12 @@
 // Ιστορικό — χρονολογική ροή εγγραφών με τους 4 Χρόνους τους.
 // Κλικ σε εγγραφή -> φόρτωση των AadeLogs (audit) από το backend.
 import { useState } from "react";
-import { getEntry, resendEntry, verifyEntry } from "../services/api";
+import {
+  downloadAuditLogXlsx,
+  getEntry,
+  resendEntry,
+  verifyEntry,
+} from "../services/api";
 import {
   STATUS_LABELS,
   STATUS_LABELS_RENTAL,
@@ -44,6 +49,34 @@ export default function HistoryLog({ entries, loading, onRefresh }) {
   // γιατί το «δεν στάλθηκε ξανά, υπήρχε ήδη» είναι ΔΙΑΦΟΡΕΤΙΚΟ αποτέλεσμα
   // από το «στάλθηκε», και ο χρήστης πρέπει να ξέρει ποιο από τα δύο έγινε.
   const [actionMsg, setActionMsg] = useState("");
+  const [exporting, setExporting] = useState(false);
+  const [exportErr, setExportErr] = useState("");
+
+  /**
+   * Κατεβάζει το Excel για τον λογιστή. Ίδιο μοτίβο με το «Εξαγωγή
+   * δεδομένων» στο AccountPrivacy — δημιουργία object URL, κλικ σε
+   * προσωρινό <a>, και ΑΠΕΛΕΥΘΕΡΩΣΗ του URL μετά (χωρίς revokeObjectURL το
+   * blob μένει στη μνήμη όσο ζει η σελίδα).
+   */
+  async function handleExport() {
+    setExporting(true);
+    setExportErr("");
+    try {
+      const { blob, filename } = await downloadAuditLogXlsx();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setExportErr(err.message);
+    } finally {
+      setExporting(false);
+    }
+  }
 
   async function toggle(id) {
     if (openId === id) {
@@ -93,15 +126,33 @@ export default function HistoryLog({ entries, loading, onRefresh }) {
     <div className="card">
       <div className="list-header">
         <h2>Ιστορικό & Audit ΑΑΔΕ</h2>
-        <button className="btn btn-ghost btn-sm" onClick={onRefresh}>
-          ↻ Ανανέωση
-        </button>
+        <div className="btn-row">
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={handleExport}
+            disabled={exporting}
+            title="Excel με όλες τις εγγραφές και τις κλήσεις ΑΑΔΕ — για τον λογιστή"
+          >
+            {exporting ? (
+              <>
+                <span className="spinner" /> Εξαγωγή…
+              </>
+            ) : (
+              "⬇️ Excel"
+            )}
+          </button>
+          <button className="btn btn-ghost btn-sm" onClick={onRefresh}>
+            ↻ Ανανέωση
+          </button>
+        </div>
       </div>
       <p className="muted">
         ΟΛΕΣ οι επισκέψεις σε χρονολογική σειρά (νεότερη πρώτα). Άνοιξε μία
         για να δεις τους 4 Χρόνους της ΑΑΔΕ και τις ακριβείς κλήσεις
         (audit log) που έγιναν γι' αυτήν.
       </p>
+
+      {exportErr && <div className="alert alert-error">{exportErr}</div>}
 
       {loading && <p className="muted">Φόρτωση…</p>}
       {!loading && sorted.length === 0 && (

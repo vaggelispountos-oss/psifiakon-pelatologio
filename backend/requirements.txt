@@ -27,3 +27,6 @@ sentry-sdk[flask]>=2.0
 # Migrations βάσης (αντικαθιστά το χειροκίνητο _add_missing_columns) — δες
 # migrations/README.md για το γιατί.
 alembic>=1.13
+# Παραγωγή .xlsx για την εξαγωγή audit log (audit_export.py) — λογιστικός
+# έλεγχος/φακέλωση. Καθαρό Python, χωρίς system dependencies.
+openpyxl>=3.1

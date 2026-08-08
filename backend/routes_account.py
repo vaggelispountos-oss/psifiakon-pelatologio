@@ -1,11 +1,15 @@
 """
 routes_account.py
 --------------------------------------------------------------------
-Λογαριασμός — εξαγωγή δεδομένων (portability) / διαγραφή (erasure), GDPR.
+Λογαριασμός — εξαγωγή δεδομένων (portability) / διαγραφή (erasure), GDPR,
+και εξαγωγή audit log σε Excel για λογιστικό έλεγχο.
 --------------------------------------------------------------------
 """
+from datetime import date
+
+from audit_export import build_audit_workbook
 from auth import require_auth, require_owner
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, g, jsonify, request, send_file
 from models import AadeLog, Customer, DclEntry, OcrMetric, Settings, Workshop, db
 from sqlalchemy.orm import selectinload
 
@@ -34,6 +38,46 @@ def export_account():
             "dclEntries": [e.to_dict(include_logs=True) for e in entries],
             "settings": settings.to_dict() if settings else None,
         }
+    )
+
+
+@account_bp.route("/api/audit-log/export.xlsx", methods=["GET"])
+@require_auth
+def export_audit_log():
+    """
+    Excel με το ιστορικό εγγραφών + όλες τις κλήσεις προς την ΑΑΔΕ, για
+    λογιστικό έλεγχο/φακέλωση. Δύο φύλλα — δες audit_export.py.
+
+    ΔΕΝ είναι @require_owner: ένας υπάλληλος μπορεί κάλλιστα να χρειαστεί να
+    βγάλει το αρχείο για τον λογιστή. Τα δεδομένα είναι ούτως ή άλλως αυτά
+    που ήδη βλέπει στο «Ιστορικό».
+    """
+    # selectinload παντού: χωρίς αυτό, ένα συνεργείο με μερικές χιλιάδες
+    # γραμμές κάνει ένα query ΑΝΑ γραμμή για να βρει τον υπάλληλο/εγγραφή
+    # (lazy=True default) — δηλαδή timeout αντί για αρχείο.
+    entries = (
+        DclEntry.query.filter_by(workshop_id=g.workshop_id)
+        .options(selectinload(DclEntry.created_by_employee))
+        .order_by(DclEntry.created_at.desc())
+        .all()
+    )
+    # Το φιλτράρισμα στο workshop_id είναι ΚΡΙΣΙΜΟ (multi-tenant): το
+    # AadeLog.workshop_id είναι nullable για ιστορικές γραμμές από πριν το
+    # migration 0004, οι οποίες σκόπιμα ΔΕΝ επιστρέφονται — δεν μπορούν να
+    # αποδοθούν με βεβαιότητα σε συγκεκριμένο συνεργείο.
+    logs = (
+        AadeLog.query.filter_by(workshop_id=g.workshop_id)
+        .options(selectinload(AadeLog.actor_employee), selectinload(AadeLog.dcl_entry))
+        .order_by(AadeLog.created_at.desc())
+        .all()
+    )
+
+    stream = build_audit_workbook(entries, logs)
+    return send_file(
+        stream,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name=f"pelatologio-audit-{date.today().isoformat()}.xlsx",
     )
 
 

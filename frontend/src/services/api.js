@@ -265,6 +265,65 @@ export function exportAccountData() {
   return request("/api/account/export");
 }
 
+/**
+ * Κατεβάζει το Excel του audit log (λογιστικός έλεγχος).
+ *
+ * ΔΕΝ περνά από το request() παραπάνω: εκείνο κάνει πάντα response.text() +
+ * JSON.parse, που πάνω σε binary .xlsx θα κατέστρεφε το αρχείο. Εδώ
+ * χρειάζεται response.blob(). Επιστρέφει {blob, filename}.
+ */
+export async function downloadAuditLogXlsx() {
+  const path = "/api/audit-log/export.xlsx";
+  const headers = {};
+  const token = getToken();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  let response;
+  try {
+    response = await fetch(`${API_URL}${path}`, { headers });
+  } catch (networkErr) {
+    throw new Error(
+      `Αποτυχία σύνδεσης με τον server (${API_URL}). ` +
+        `Βεβαιώσου ότι το backend τρέχει. (${networkErr.message})`
+    );
+  }
+
+  // Έληξε το access token -> ανανέωσε ΜΙΑ φορά και ξαναδοκίμασε, ίδια
+  // σημασιολογία με το request().
+  if (response.status === 401) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) {
+      const retryHeaders = { Authorization: `Bearer ${getToken()}` };
+      response = await fetch(`${API_URL}${path}`, { headers: retryHeaders });
+    } else {
+      clearSession();
+      if (onUnauthorized) onUnauthorized();
+    }
+  }
+
+  if (!response.ok) {
+    // Σε σφάλμα το backend στέλνει JSON, όχι xlsx — διάβασέ το ως κείμενο
+    // ώστε ο χρήστης να δει το πραγματικό μήνυμα αντί για «κατέβηκε αρχείο».
+    let message = `Σφάλμα διακομιστή (HTTP ${response.status}).`;
+    try {
+      const data = JSON.parse(await response.text());
+      if (data?.error) message = data.error;
+    } catch {
+      /* κράτα το γενικό μήνυμα */
+    }
+    throw new Error(message);
+  }
+
+  // Το όνομα αρχείου το ορίζει το backend (Content-Disposition) — κράτα το
+  // ώστε να μη διαφωνούν τα δύο άκρα για την ημερομηνία στο όνομα.
+  const disposition = response.headers.get("Content-Disposition") || "";
+  const match = disposition.match(/filename="?([^";]+)"?/i);
+  return {
+    blob: await response.blob(),
+    filename: match ? match[1] : "audit-log.xlsx",
+  };
+}
+
 export function deleteAccount(password) {
   return request("/api/account", {
     method: "DELETE",
