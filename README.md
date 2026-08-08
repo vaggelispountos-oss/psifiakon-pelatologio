@@ -61,9 +61,44 @@ pytest
 ```
 
 Τρέχουν αυτόματα σε κάθε push/PR στο `main` ([`.github/workflows/tests.yml`](.github/workflows/tests.yml)).
+
+## Backup / Restore
+
+```bash
+# Backup (Postgres ή SQLite — επιλέγεται αυτόματα από το DATABASE_URL)
+DATABASE_URL=... backend/scripts/backup_db.sh backups
+
+# Restore (⚠️ ΚΑΤΑΣΤΡΟΦΙΚΟ — ζητά επιβεβαίωση, FORCE=1 για παράκαμψη)
+DATABASE_URL=... backend/scripts/restore_db.sh backups/dcl-backup-....db.gz
+```
+
 Καθημερινό backup της production Postgres μέσω
-[`.github/workflows/backup.yml`](.github/workflows/backup.yml) (χρειάζεται το
-GitHub secret `DATABASE_URL`).
+[`.github/workflows/backup.yml`](.github/workflows/backup.yml).
+
+> ⚠️ **Το GitHub secret `DATABASE_URL` πρέπει να είναι το External Database
+> URL του Render**, όχι το Internal. Το internal hostname
+> (`dpg-xxxxx-a`, χωρίς domain) επιλύεται ΜΟΝΟ μέσα στο δίκτυο του Render,
+> οπότε από GitHub Actions το `pg_dump` σκάει με «could not translate host
+> name». Ακριβώς έτσι απέτυχε σιωπηλά **κάθε** εκτέλεση του backup μέχρι
+> τις 2026-08-08 — καμία επιτυχής, δηλαδή κανένα backup. Το
+> `backup_db.sh` πλέον το ανιχνεύει και βγάζει ρητό μήνυμα αντί για το
+> κρυπτικό DNS σφάλμα.
+
+Τα backups κρατιούνται ως GitHub artifacts για 30 ημέρες. Κράτα το
+`ENCRYPTION_KEY` **μαζί** με τα backups: τα κλειδιά ΑΑΔΕ είναι
+κρυπτογραφημένα μ' αυτό, και restore με διαφορετικό κλειδί τα αφήνει μη
+αναγνώσιμα (δες [`backend/crypto.py`](backend/crypto.py)).
+
+## Health checks
+
+| Endpoint | Σκοπός |
+|---|---|
+| `/api/health` | **Liveness** — ρηχό, δεν αγγίζει τη βάση. Αυτό δείχνει το `healthCheckPath` του Render. |
+| `/api/health/ready` | **Readiness** — κάνει `SELECT 1`, γυρνά 503 αν η βάση δεν απαντά. Για monitoring/alerting. |
+
+Ο διαχωρισμός είναι σκόπιμος: αν το `healthCheckPath` έλεγχε τη βάση, ένα
+στιγμιαίο πρόβλημα σύνδεσης θα έβαζε το Render σε restart loop ακριβώς τη
+στιγμή που η βάση δυσκολεύεται.
 
 ## Παραγωγή — γνωστά ανοιχτά θέματα
 

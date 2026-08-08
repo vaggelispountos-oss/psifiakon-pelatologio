@@ -12,8 +12,9 @@ Flask backend για το σύστημα Ψηφιακού Πελατολογίο
     (+ ακύρωση) -> POST /api/dcl/cancel      (CancelClient)
 --------------------------------------------------------------------
 """
-from flask import Flask, jsonify
+from flask import Flask, current_app, jsonify
 from flask_cors import CORS
+from sqlalchemy import text
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from aade_core import ApiError
@@ -103,7 +104,38 @@ def register_routes(app):
 
     @app.route("/api/health", methods=["GET"])
     def health():
+        """
+        LIVENESS — σκόπιμα ΡΗΧΟ: ΔΕΝ αγγίζει τη βάση.
+
+        Το render.yaml το χρησιμοποιεί ως healthCheckPath. Αν έλεγχε τη βάση,
+        ένα στιγμιαίο πρόβλημα σύνδεσης θα έκανε το Render να σκοτώσει και να
+        ξαναστήσει το service — restart loop ακριβώς τη στιγμή που η βάση
+        δυσκολεύεται, δηλαδή η χειρότερη δυνατή στιγμή. Απαντά «ζω», όχι
+        «είμαι έτοιμο». Για το δεύτερο δες /api/health/ready.
+        """
         return jsonify({"status": "ok"})
+
+    @app.route("/api/health/ready", methods=["GET"])
+    def health_ready():
+        """
+        READINESS — για monitoring/alerting, ΟΧΙ για healthCheckPath.
+
+        Εδώ μπαίνει η βάση: ένα SELECT 1 πιάνει εξαντλημένο connection pool ή
+        πεσμένο Postgres, που το liveness από πάνω δεν βλέπει.
+        """
+        try:
+            db.session.execute(text("SELECT 1"))
+            return jsonify({"status": "ok", "database": "ok"})
+        except Exception as err:
+            # Χωρίς rollback η session μένει σε failed state και ΚΑΘΕ επόμενο
+            # query στον ίδιο gunicorn worker σκάει — ένα αποτυχημένο health
+            # check θα μόλυνε πραγματικά αιτήματα χρηστών.
+            db.session.rollback()
+            current_app.logger.error("readiness check failed: %s", err)
+            # Γενικό μήνυμα προς τα έξω: το endpoint είναι δημόσιο και οι
+            # λεπτομέρειες της βάσης δεν έχουν λόγο να διαρρέουν. Το πλήρες
+            # σφάλμα πάει στα logs (και στο Sentry, αν έχει ρυθμιστεί).
+            return jsonify({"status": "error", "database": "unreachable"}), 503
 
     app.register_blueprint(settings_bp)
     app.register_blueprint(customers_bp)
