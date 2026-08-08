@@ -4,7 +4,7 @@
 // Δεδομένα από το backend (OcrMetric): μία γραμμή ανά σάρωση, ενημερωμένη
 // με το τελικό αποτέλεσμα όταν ο χρήστης πατήσει «Δημιουργία εγγραφής».
 // --------------------------------------------------------------------
-import { useEffect, useState } from "react";
+import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { getOcrMetrics, getOcrMetricsSummary } from "../services/api";
 
 function fmt(iso) {
@@ -28,37 +28,28 @@ function Stat({ value, label, color }) {
 }
 
 export default function OcrStats() {
-  const [summary, setSummary] = useState(null);
-  const [recent, setRecent] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const queryClient = useQueryClient();
+  const [summaryQuery, recentQuery] = useQueries({
+    queries: [
+      { queryKey: ["ocrMetricsSummary"], queryFn: getOcrMetricsSummary, placeholderData: (p) => p },
+      { queryKey: ["ocrMetrics", 30], queryFn: () => getOcrMetrics(30), placeholderData: (p) => p },
+    ],
+  });
+  const summary = summaryQuery.data || null;
+  const recent = recentQuery.data || [];
+  const loading = summaryQuery.isFetching || recentQuery.isFetching;
+  const error = summaryQuery.error?.message || recentQuery.error?.message || "";
 
-  async function load() {
-    setLoading(true);
-    setError("");
-    try {
-      const [s, r] = await Promise.all([
-        getOcrMetricsSummary(),
-        getOcrMetrics(30),
-      ]);
-      setSummary(s);
-      setRecent(r);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
+  function refresh() {
+    queryClient.invalidateQueries({ queryKey: ["ocrMetricsSummary"] });
+    queryClient.invalidateQueries({ queryKey: ["ocrMetrics", 30] });
   }
-
-  useEffect(() => {
-    load();
-  }, []);
 
   return (
     <div className="card">
       <div className="list-header">
         <h2>Στατιστικά OCR πινακίδας</h2>
-        <button className="btn btn-ghost btn-sm" onClick={load}>
+        <button className="btn btn-ghost btn-sm" onClick={refresh}>
           ↻ Ανανέωση
         </button>
       </div>
