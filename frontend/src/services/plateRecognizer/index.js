@@ -26,7 +26,44 @@ import * as plateRecognizerApiRecognizer from "./plateRecognizerApiRecognizer";
 // bundle (~400kB) αλλά χρειάζεται ΜΟΝΟ όταν πράγματι τρέξει tesseract engine
 // (pref="tesseract" ή fallback μετά από αποτυχία ALPR) — χωρίς αυτό,
 // κατέβαινε σε ΚΑΘΕ άνοιγμα της εφαρμογής ακόμα κι αν δεν σκανάρεις ποτέ.
-const loadTesseractRecognizer = () => import("./tesseractRecognizer");
+// Reload guard: μετά από deploy, ένα tab που έμεινε ανοιχτό τρέχει ακόμα το
+// ΠΑΛΙΟ JS στη μνήμη και ζητάει το ΠΑΛΙΟ hashed chunk filename, που πλέον δεν
+// υπάρχει -> "Failed to fetch dynamically imported module". Αντί να δείχνουμε
+// σφάλμα στον χρήστη, κάνουμε ΕΝΑ αυτόματο reload (guard με sessionStorage
+// ώστε να μην μπούμε σε loop αν το σφάλμα είναι κάτι άλλο) ώστε να πάρει το
+// φρέσκο build/chunk χωρίς να χρειάζεται να καταλάβει τι έγινε.
+const CHUNK_RELOAD_FLAG = "ocrChunkReloadAttempted";
+
+function isChunkLoadError(err) {
+  return /fetch dynamically imported module|error loading dynamically imported module/i.test(
+    err?.message || ""
+  );
+}
+
+const loadTesseractRecognizer = () =>
+  import("./tesseractRecognizer").catch((err) => {
+    if (isChunkLoadError(err)) {
+      let alreadyTried = false;
+      try {
+        alreadyTried = sessionStorage.getItem(CHUNK_RELOAD_FLAG) === "1";
+      } catch {
+        // localStorage/sessionStorage απενεργοποιημένο -> προχώρα σαν να μην
+        // έχει ξαναγίνει reload (καλύτερα ένα παραπάνω reload παρά loop).
+      }
+      if (!alreadyTried) {
+        try {
+          sessionStorage.setItem(CHUNK_RELOAD_FLAG, "1");
+        } catch {
+          // αγνόησε — χωρίς το flag απλά δεν θα μπλοκάρει ένα ενδεχόμενο loop
+        }
+        window.location.reload();
+        // Το reload διακόπτει την τρέχουσα σελίδα ούτως ή άλλως — αυτό το
+        // Promise δεν χρειάζεται ποτέ να resolve/reject.
+        return new Promise(() => {});
+      }
+    }
+    throw err;
+  });
 
 const STORAGE_KEY = "ocrEngine";
 

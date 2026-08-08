@@ -8,6 +8,10 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: "autoUpdate",
+      // Χειροκίνητο register (main.jsx, virtual:pwa-register) αντί για το
+      // auto-injected script tag — ώστε να ελέγχουμε ΠΟΤΕ ξεκινά ο έλεγχος
+      // για update (immediate:true).
+      injectRegister: false,
       // Η κάμερα/OCR χρειάζονται δίκτυο ούτως ή άλλως (backend) — το SW
       // εδώ υπάρχει ΜΟΝΟ για installability, όχι για πλήρες offline mode.
       workbox: {
