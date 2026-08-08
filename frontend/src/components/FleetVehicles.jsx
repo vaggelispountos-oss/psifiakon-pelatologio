@@ -4,7 +4,8 @@
 // επιτρέπει επιλογή ΜΟΝΟ από αυτή τη λίστα (dropdown, όχι ελεύθερο κείμενο) —
 // το backend το επιβάλλει ούτως ή άλλως (δες create_entry: 400 αν η πινακίδα
 // δεν ανήκει στον στόλο).
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getFleetVehicles,
   createFleetVehicle,
@@ -122,9 +123,16 @@ function EditRow({ vehicle, onCancel, onSaved }) {
 }
 
 export default function FleetVehicles({ entries }) {
-  const [vehicles, setVehicles] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const queryClient = useQueryClient();
+  const vehiclesQuery = useQuery({
+    queryKey: ["fleetVehicles"],
+    queryFn: getFleetVehicles,
+    placeholderData: (prev) => prev,
+  });
+  const vehicles = vehiclesQuery.data || [];
+  const loading = vehiclesQuery.isFetching;
+  const [actionError, setActionError] = useState("");
+  const error = vehiclesQuery.error?.message || actionError;
   const [editingId, setEditingId] = useState(null);
 
   const [newPlate, setNewPlate] = useState("");
@@ -133,22 +141,7 @@ export default function FleetVehicles({ entries }) {
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState("");
 
-  async function load() {
-    setLoading(true);
-    setError("");
-    try {
-      const data = await getFleetVehicles();
-      setVehicles(Array.isArray(data) ? data : []);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    load();
-  }, []);
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["fleetVehicles"] });
 
   async function handleAdd(e) {
     e.preventDefault();
@@ -160,14 +153,12 @@ export default function FleetVehicles({ entries }) {
     setAdding(true);
     setAddError("");
     try {
-      const created = await createFleetVehicle({
+      await createFleetVehicle({
         plate,
         label: newLabel.trim(),
         category: newCategory,
       });
-      setVehicles((prev) =>
-        [...prev, created].sort((a, b) => a.plate.localeCompare(b.plate))
-      );
+      await refresh();
       setNewPlate("");
       setNewLabel("");
       setNewCategory("car");
@@ -182,9 +173,9 @@ export default function FleetVehicles({ entries }) {
     if (!window.confirm(`Διαγραφή του οχήματος ${vehicle.plate} από τον στόλο;`)) return;
     try {
       await deleteFleetVehicle(vehicle.id);
-      setVehicles((prev) => prev.filter((v) => v.id !== vehicle.id));
+      await refresh();
     } catch (err) {
-      setError(err.message);
+      setActionError(err.message);
     }
   }
 
@@ -192,7 +183,7 @@ export default function FleetVehicles({ entries }) {
     <div className="card">
       <div className="list-header">
         <h2>Στόλος Οχημάτων</h2>
-        <button className="btn btn-ghost btn-sm" onClick={load}>
+        <button className="btn btn-ghost btn-sm" onClick={refresh}>
           ↻ Ανανέωση
         </button>
       </div>
@@ -271,12 +262,8 @@ export default function FleetVehicles({ entries }) {
                       key={v.id}
                       vehicle={v}
                       onCancel={() => setEditingId(null)}
-                      onSaved={(updated) => {
-                        setVehicles((prev) =>
-                          prev
-                            .map((row) => (row.id === updated.id ? updated : row))
-                            .sort((a, b) => a.plate.localeCompare(b.plate))
-                        );
+                      onSaved={() => {
+                        refresh();
                         setEditingId(null);
                       }}
                     />
