@@ -19,6 +19,7 @@ import {
   getStoredWorkshop,
   getToken,
   logout,
+  resendVerificationEmail,
   setStoredWorkshop,
   setUnauthorizedHandler,
 } from "./services/api";
@@ -37,6 +38,7 @@ import { SettingsAccordion } from "./components/SettingsPanel";
 import Login from "./components/Login";
 import { PrivacyPolicy, TermsOfService } from "./components/LegalPages";
 import ResetPassword from "./components/ResetPassword";
+import VerifyEmail from "./components/VerifyEmail";
 
 // Πελάτες/Ιστορικό/Οχήματα ήταν 3 ξεχωριστά tabs που έδειχναν την ΙΔΙΑ λίστα
 // εγγραφών, απλά ομαδοποιημένη διαφορετικά — μπερδεμένο ΠΟΙΟ tab έχει τι
@@ -141,6 +143,9 @@ export default function App() {
   if (window.location.pathname === "/reset-password") {
     return <ResetPassword />;
   }
+  if (window.location.pathname === "/verify-email") {
+    return <VerifyEmail />;
+  }
 
   if (!isAuthenticated) {
     return (
@@ -167,6 +172,45 @@ export default function App() {
         setWorkshop(w);
       }}
     />
+  );
+}
+
+// Μπάνερ «επιβεβαίωσε το email σου» — δεν μπλοκάρει τη χρήση της εφαρμογής
+// (δες auth.py: το require_auth δεν ελέγχει email_verified), απλά υπενθυμίζει
+// και επιτρέπει επαναποστολή αν χάθηκε/έληξε το πρώτο link.
+function VerifyEmailBanner({ email }) {
+  const [state, setState] = useState("idle"); // idle | sending | sent | error
+  const [error, setError] = useState("");
+
+  async function handleResend() {
+    setState("sending");
+    setError("");
+    try {
+      await resendVerificationEmail();
+      setState("sent");
+    } catch (err) {
+      setError(err.message);
+      setState("error");
+    }
+  }
+
+  return (
+    <div className="alert alert-info banner">
+      ✉️ Επιβεβαίωσε το email σου ({email}) — έλεγξε τα εισερχόμενά σου.{" "}
+      {state === "sent" ? (
+        <b>Στάλθηκε νέο email.</b>
+      ) : (
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={handleResend}
+          disabled={state === "sending"}
+        >
+          {state === "sending" ? "Αποστολή…" : "Αποστολή ξανά"}
+        </button>
+      )}
+      {state === "error" && <span className="conn-fail"> {error}</span>}
+    </div>
   );
 }
 
@@ -574,6 +618,10 @@ function AuthenticatedApp({ workshop, actor, onLogout, onWorkshopUpdated }) {
         <div className="alert alert-error banner">
           Το backend δεν είναι προσβάσιμο ({API_URL}). Τρέξε το Flask backend.
         </div>
+      )}
+
+      {workshop?.emailVerified === false && (
+        <VerifyEmailBanner email={workshop.email} />
       )}
 
       {toast && (

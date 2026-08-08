@@ -36,7 +36,17 @@ from flask_limiter.util import get_remote_address
 
 from config import Config
 from email_service import send_email
-from models import AadeLog, DclEntry, Employee, PasswordResetToken, Settings, Workshop, db, utcnow
+from models import (
+    AadeLog,
+    DclEntry,
+    Employee,
+    EmailVerificationToken,
+    PasswordResetToken,
+    Settings,
+    Workshop,
+    db,
+    utcnow,
+)
 
 jwt = JWTManager()
 
@@ -246,6 +256,39 @@ def _issue_tokens(workshop, employee=None):
     }
 
 
+EMAIL_VERIFICATION_TTL_MINUTES = 60 * 24  # 24 ώρες
+
+
+def _send_verification_email(workshop):
+    """
+    Δημιουργεί token επιβεβαίωσης email και το στέλνει στο workshop.email.
+    Best-effort: σφάλμα αποστολής (π.χ. Resend down) ΔΕΝ πρέπει να μπλοκάρει
+    την εγγραφή — καταγράφεται μόνο (ίδια λογική με forgot_password/
+    email_service.send_email, που ήδη κάνει swallow σε network errors).
+    """
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    verification_token = EmailVerificationToken(
+        workshop_id=workshop.id,
+        token_hash=token_hash,
+        expires_at=utcnow() + timedelta(minutes=EMAIL_VERIFICATION_TTL_MINUTES),
+    )
+    db.session.add(verification_token)
+    db.session.commit()
+
+    verify_link = f"{current_app.config['FRONTEND_URL']}/verify-email?token={raw_token}"
+    send_email(
+        to=workshop.email,
+        subject="Επιβεβαίωση email — Ψηφιακό Πελατολόγιο",
+        html=(
+            f"<p>Καλωσόρισες στο Ψηφιακό Πελατολόγιο! Επιβεβαίωσε το email σου:</p>"
+            f'<p><a href="{verify_link}">Πάτησε εδώ για επιβεβαίωση</a> '
+            f"(ισχύει για {EMAIL_VERIFICATION_TTL_MINUTES // 60} ώρες).</p>"
+            "<p>Αν δεν έκανες εσύ εγγραφή, αγνόησε αυτό το email.</p>"
+        ),
+    )
+
+
 @auth_bp.route("/register", methods=["POST"])
 @limiter.limit("10 per minute")
 def register():
@@ -285,6 +328,8 @@ def register():
     workshop.set_password(password)
     db.session.add(workshop)
     db.session.commit()
+
+    _send_verification_email(workshop)
 
     return jsonify(_issue_tokens(workshop)), 201
 
@@ -645,6 +690,52 @@ def reset_password():
     reset_token.used_at = utcnow()
     db.session.commit()
     return jsonify({"message": "Ο κωδικός άλλαξε. Συνδέσου με τον νέο κωδικό."})
+
+
+@auth_bp.route("/verify-email", methods=["POST"])
+@limiter.limit("20 per minute")
+def verify_email():
+    data = request.get_json(silent=True) or {}
+    raw_token = data.get("token") or ""
+
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    verification_token = EmailVerificationToken.query.filter_by(
+        token_hash=token_hash
+    ).first()
+
+    if (
+        verification_token is None
+        or verification_token.used_at is not None
+        or utcnow().replace(tzinfo=None) > verification_token.expires_at
+    ):
+        return (
+            jsonify({"error": "Ο σύνδεσμος επιβεβαίωσης δεν ισχύει πια — ζήτησε νέον."}),
+            400,
+        )
+
+    workshop = Workshop.query.get(verification_token.workshop_id)
+    if workshop is None:
+        return jsonify({"error": "Δεν βρέθηκε ο λογαριασμός."}), 404
+
+    workshop.email_verified = True
+    workshop.email_verified_at = utcnow()
+    verification_token.used_at = utcnow()
+    db.session.commit()
+    return jsonify({"message": "Το email επιβεβαιώθηκε.", "workshop": workshop.to_dict()})
+
+
+@auth_bp.route("/resend-verification", methods=["POST"])
+@require_auth
+@limiter.limit("3 per minute", key_func=workshop_key)
+def resend_verification():
+    workshop = Workshop.query.get(g.workshop_id)
+    if workshop is None:
+        return jsonify({"error": "Δεν βρέθηκε ο λογαριασμός."}), 404
+    if workshop.email_verified:
+        return jsonify({"message": "Το email είναι ήδη επιβεβαιωμένο."})
+
+    _send_verification_email(workshop)
+    return jsonify({"message": "Στάλθηκε νέο email επιβεβαίωσης."})
 
 
 def init_auth(app):

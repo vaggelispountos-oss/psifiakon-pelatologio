@@ -233,6 +233,18 @@ export function resetPassword(token, password) {
   });
 }
 
+export function verifyEmail(token) {
+  return request("/api/auth/verify-email", {
+    method: "POST",
+    body: { token },
+    skipAuth: true,
+  });
+}
+
+export function resendVerificationEmail() {
+  return request("/api/auth/resend-verification", { method: "POST" });
+}
+
 // ---- Λογαριασμός — αλλαγή κωδικού / τύπου επιχείρησης ----
 export function changePassword(currentPassword, newPassword) {
   return request("/api/auth/password", {

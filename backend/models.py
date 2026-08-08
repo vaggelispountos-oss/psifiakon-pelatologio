@@ -58,6 +58,11 @@ class Workshop(db.Model):
     # ζει 30 μέρες) — ο ιδιοκτήτης δεν έχει κανέναν τρόπο να «διώξει» τον
     # επιτιθέμενο.
     token_epoch = db.Column(db.Integer, default=0, nullable=False)
+    # Επιβεβαίωση email (δες auth.py: /verify-email, /resend-verification).
+    # Υπάρχοντα workshops πριν από αυτή τη στήλη θεωρούνται ήδη επιβεβαιωμένα
+    # (η migration τα γεμίζει με True) — μόνο ΝΕΕΣ εγγραφές ξεκινούν False.
+    email_verified = db.Column(db.Boolean, default=False, nullable=False)
+    email_verified_at = db.Column(db.DateTime, nullable=True)
 
     def set_password(self, raw_password):
         self.password_hash = generate_password_hash(raw_password)
@@ -83,6 +88,7 @@ class Workshop(db.Model):
             "subscriptionStatus": self.subscription_status,
             "businessType": self.effective_business_type,
             "createdAt": self.created_at.isoformat() if self.created_at else None,
+            "emailVerified": self.email_verified,
         }
 
 
@@ -635,6 +641,25 @@ class PasswordResetToken(db.Model):
     """
 
     __tablename__ = "password_reset_tokens"
+
+    id = db.Column(db.Integer, primary_key=True)
+    workshop_id = db.Column(
+        db.Integer, db.ForeignKey("workshops.id"), nullable=False, index=True
+    )
+    token_hash = db.Column(db.String(64), nullable=False, unique=True, index=True)
+    created_at = db.Column(db.DateTime, default=utcnow)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    used_at = db.Column(db.DateTime, nullable=True)
+
+
+class EmailVerificationToken(db.Model):
+    """
+    Token επιβεβαίωσης email (δες auth.py: /verify-email, /resend-verification).
+    Ίδιο μοτίβο ασφάλειας με το PasswordResetToken παραπάνω — μόνο το sha256
+    hash αποθηκεύεται, ποτέ το ίδιο το token.
+    """
+
+    __tablename__ = "email_verification_tokens"
 
     id = db.Column(db.Integer, primary_key=True)
     workshop_id = db.Column(
