@@ -118,9 +118,6 @@ def upgrade_to_head():
         inspector = inspect(engine)
         has_alembic_version = inspector.has_table("alembic_version")
         has_app_tables = inspector.has_table(_BASELINE_PROBE_TABLE)
-
-        if has_app_tables:
-            _sync_missing_nullable_columns(engine)
     finally:
         engine.dispose()
 
@@ -131,7 +128,29 @@ def upgrade_to_head():
         )
         command.stamp(alembic_cfg, _BASELINE_REVISION)
 
+    # ⚠️ Η ΣΕΙΡΑ ΕΔΩ ΕΙΝΑΙ ΚΡΙΣΙΜΗ — upgrade ΠΡΩΤΑ, sync ΜΕΤΑ.
+    #
+    # Παλιότερα το _sync_missing_nullable_columns έτρεχε ΠΡΙΝ το upgrade. Το
+    # sync σαρώνει το models.py και προσθέτει όποια nullable στήλη λείπει,
+    # οπότε πρόλαβε και πρόσθεσε ακριβώς τις στήλες που επρόκειτο να
+    # προσθέσει το migration 0004 — το Alembic μετά πήγε να τις
+    # ξαναπροσθέσει και το build έσκασε (DuplicateColumn σε Postgres).
+    # Χειρότερα, το sync κάνει commit πριν σκάσει το upgrade, οπότε η βάση
+    # έμενε μισο-μεταναστευμένη και ΚΑΘΕ επόμενο deploy απέτυχε ίδια.
+    # Τέσσερα production deploys χάθηκαν έτσι (8 Αυγ 2026).
+    #
+    # Με αυτή τη σειρά, τα migrations βρίσκουν τη βάση όπως την περιμένουν,
+    # και το sync κρατά τον αρχικό του ρόλο: δίχτυ ασφαλείας για ιστορική
+    # απόκλιση που ΚΑΝΕΝΑ migration δεν καλύπτει (δες το docstring παραπάνω
+    # για το περιστατικό με το aade_state).
     command.upgrade(alembic_cfg, "head")
+
+    engine = create_engine(AppConfig.SQLALCHEMY_DATABASE_URI)
+    try:
+        if inspect(engine).has_table(_BASELINE_PROBE_TABLE):
+            _sync_missing_nullable_columns(engine)
+    finally:
+        engine.dispose()
 
 
 if __name__ == "__main__":

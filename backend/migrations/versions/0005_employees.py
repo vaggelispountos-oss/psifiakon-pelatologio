@@ -12,6 +12,13 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
+from migration_helpers import (
+    add_column_if_missing,
+    create_fk_if_missing,
+    create_index_if_missing,
+    table_exists,
+)
+
 # revision identifiers, used by Alembic.
 revision: str = '0005'
 down_revision: Union[str, Sequence[str], None] = '0004'
@@ -20,53 +27,52 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.create_table(
-        "employees",
-        sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column(
-            "workshop_id",
-            sa.Integer(),
-            sa.ForeignKey("workshops.id"),
-            nullable=False,
-        ),
-        sa.Column("name", sa.String(length=255), nullable=False),
-        sa.Column("email", sa.String(length=255), nullable=False, unique=True),
-        sa.Column("password_hash", sa.String(length=255), nullable=False),
-        sa.Column(
-            "is_active", sa.Boolean(), nullable=False, server_default=sa.true()
-        ),
-        sa.Column(
-            "token_epoch", sa.Integer(), nullable=False, server_default="0"
-        ),
-        sa.Column("created_at", sa.DateTime(), nullable=True),
-    )
-    op.create_index(
-        "ix_employees_workshop_id", "employees", ["workshop_id"], unique=False
+    # Idempotent παντού — δες migration_helpers.py για το γιατί (βάσεις που
+    # έμειναν μισο-μεταναστευμένες από το παλιό sync-πριν-το-upgrade).
+    # ΠΡΟΣΟΧΗ: ο πίνακας employees ΔΕΝ δημιουργούνταν ποτέ από το sync (αυτό
+    # πρόσθετε μόνο στήλες σε υπάρχοντες πίνακες), ενώ οι δύο στήλες
+    # παρακάτω ΝΑΙ — γι' αυτό η βάση μπορεί να έχει τις στήλες χωρίς τον
+    # πίνακα στον οποίο δείχνουν.
+    if not table_exists("employees"):
+        op.create_table(
+            "employees",
+            sa.Column("id", sa.Integer(), primary_key=True),
+            sa.Column(
+                "workshop_id",
+                sa.Integer(),
+                sa.ForeignKey("workshops.id"),
+                nullable=False,
+            ),
+            sa.Column("name", sa.String(length=255), nullable=False),
+            sa.Column("email", sa.String(length=255), nullable=False, unique=True),
+            sa.Column("password_hash", sa.String(length=255), nullable=False),
+            sa.Column(
+                "is_active", sa.Boolean(), nullable=False, server_default=sa.true()
+            ),
+            sa.Column(
+                "token_epoch", sa.Integer(), nullable=False, server_default="0"
+            ),
+            sa.Column("created_at", sa.DateTime(), nullable=True),
+        )
+    create_index_if_missing(
+        "ix_employees_workshop_id", "employees", ["workshop_id"]
     )
 
-    with op.batch_alter_table("dcl_entries") as batch_op:
-        batch_op.add_column(
-            sa.Column("created_by_employee_id", sa.Integer(), nullable=True)
-        )
-        batch_op.create_foreign_key(
-            "fk_dcl_entries_created_by_employee_id",
-            "employees",
-            ["created_by_employee_id"],
-            ["id"],
-            ondelete="SET NULL",
-        )
+    add_column_if_missing(
+        "dcl_entries", sa.Column("created_by_employee_id", sa.Integer(), nullable=True)
+    )
+    create_fk_if_missing(
+        "fk_dcl_entries_created_by_employee_id", "dcl_entries", "employees",
+        ["created_by_employee_id"], ["id"], ondelete="SET NULL",
+    )
 
-    with op.batch_alter_table("aade_logs") as batch_op:
-        batch_op.add_column(
-            sa.Column("actor_employee_id", sa.Integer(), nullable=True)
-        )
-        batch_op.create_foreign_key(
-            "fk_aade_logs_actor_employee_id",
-            "employees",
-            ["actor_employee_id"],
-            ["id"],
-            ondelete="SET NULL",
-        )
+    add_column_if_missing(
+        "aade_logs", sa.Column("actor_employee_id", sa.Integer(), nullable=True)
+    )
+    create_fk_if_missing(
+        "fk_aade_logs_actor_employee_id", "aade_logs", "employees",
+        ["actor_employee_id"], ["id"], ondelete="SET NULL",
+    )
 
 
 def downgrade() -> None:

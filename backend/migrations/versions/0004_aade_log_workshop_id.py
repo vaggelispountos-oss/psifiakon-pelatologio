@@ -18,6 +18,12 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
+from migration_helpers import (
+    add_column_if_missing,
+    create_fk_if_missing,
+    create_index_if_missing,
+)
+
 # revision identifiers, used by Alembic.
 revision: str = '0004'
 down_revision: Union[str, Sequence[str], None] = '0003'
@@ -26,14 +32,19 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    with op.batch_alter_table("aade_logs") as batch_op:
-        batch_op.add_column(sa.Column("workshop_id", sa.Integer(), nullable=True))
-        batch_op.create_index(
-            "ix_aade_logs_workshop_id", ["workshop_id"], unique=False
-        )
-        batch_op.create_foreign_key(
-            "fk_aade_logs_workshop_id", "workshops", ["workshop_id"], ["id"]
-        )
+    # Idempotent: η στήλη μπορεί να υπάρχει ήδη από το παλιό
+    # _sync_missing_nullable_columns που έτρεχε ΠΡΙΝ το upgrade και άφησε
+    # τη βάση μισο-μεταναστευμένη — δες migration_helpers.py.
+    add_column_if_missing(
+        "aade_logs", sa.Column("workshop_id", sa.Integer(), nullable=True)
+    )
+    create_index_if_missing(
+        "ix_aade_logs_workshop_id", "aade_logs", ["workshop_id"]
+    )
+    create_fk_if_missing(
+        "fk_aade_logs_workshop_id", "aade_logs", "workshops",
+        ["workshop_id"], ["id"],
+    )
 
     # Backfill: ΜΟΝΟ οι γραμμές που συνδέονται με ένα dcl_entries (άρα
     # ξέρουμε σε ποιο workshop ανήκουν). Γραμμές με dcl_entry_id IS NULL
