@@ -4,7 +4,8 @@
 // Το Subscription Key ΔΕΝ φορτώνεται ποτέ ολόκληρο (ασφάλεια): αν υπάρχει,
 // δείχνουμε placeholder και το αφήνουμε κενό ώστε να μην αλλάξει.
 // --------------------------------------------------------------------
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getSettings,
   updateSettings,
@@ -23,16 +24,20 @@ import AccountPrivacy from "./AccountPrivacy";
 import EmployeesPanel from "./EmployeesPanel";
 
 export default function SettingsPanel({ onSaved }) {
+  const queryClient = useQueryClient();
+  const statusQuery = useQuery({ queryKey: ["aadeSettings"], queryFn: getSettings });
+  const status = statusQuery.data ?? null; // {has_key, masked_key}
+  const loading = statusQuery.isLoading;
+  const error = statusQuery.error?.message || "";
+
   const [username, setUsername] = useState("");
   const [key, setKey] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [branch, setBranch] = useState("0");
   const [vat, setVat] = useState("");
 
-  const [status, setStatus] = useState(null); // {has_key, masked_key}
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
+  const [saveError, setSaveError] = useState("");
   const [ok, setOk] = useState("");
 
   const [testing, setTesting] = useState(false);
@@ -40,30 +45,22 @@ export default function SettingsPanel({ onSaved }) {
 
   const [switchingLive, setSwitchingLive] = useState(false);
 
-  async function load() {
-    setLoading(true);
-    setError("");
-    try {
-      const s = await getSettings();
-      setStatus(s);
-      setUsername(s.aade_username || "");
-      setBranch(String(s.branch ?? 0));
-      setVat(s.entity_vat_number || "");
-      setKey(""); // ποτέ δεν φορτώνουμε το key
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
+  // Τα πεδία φόρμας συγχρονίζονται ΜΟΝΟ στην πρώτη φόρτωση — μετά είναι
+  // draft state του χρήστη, δεν πρέπει να ξαναγραφούν από background refetch.
+  const initializedRef = useRef(false);
   useEffect(() => {
-    load();
-  }, []);
+    if (status && !initializedRef.current) {
+      setUsername(status.aade_username || "");
+      setBranch(String(status.branch ?? 0));
+      setVat(status.entity_vat_number || "");
+      setKey(""); // ποτέ δεν φορτώνουμε το key
+      initializedRef.current = true;
+    }
+  }, [status]);
 
   async function handleSave(e) {
     e.preventDefault();
-    setError("");
+    setSaveError("");
     setOk("");
     setSaving(true);
     try {
@@ -74,12 +71,12 @@ export default function SettingsPanel({ onSaved }) {
         branch: Number(branch),
         entity_vat_number: vat.trim(),
       });
-      setStatus(s);
+      queryClient.setQueryData(["aadeSettings"], s);
       setKey("");
       setOk("Οι ρυθμίσεις αποθηκεύτηκαν.");
       if (onSaved) onSaved(s);
     } catch (err) {
-      setError(err.message);
+      setSaveError(err.message);
     } finally {
       setSaving(false);
     }
@@ -109,14 +106,14 @@ export default function SettingsPanel({ onSaved }) {
       return;
     }
     setSwitchingLive(true);
-    setError("");
+    setSaveError("");
     setOk("");
     try {
       const s = await setAadeLiveMode(true);
-      setStatus(s);
+      queryClient.setQueryData(["aadeSettings"], s);
       setOk("Η πραγματική σύνδεση με την ΑΑΔΕ ενεργοποιήθηκε.");
     } catch (err) {
-      setError(err.message);
+      setSaveError(err.message);
     } finally {
       setSwitchingLive(false);
     }
@@ -132,14 +129,14 @@ export default function SettingsPanel({ onSaved }) {
       return;
     }
     setSwitchingLive(true);
-    setError("");
+    setSaveError("");
     setOk("");
     try {
       const s = await setAadeLiveMode(false);
-      setStatus(s);
+      queryClient.setQueryData(["aadeSettings"], s);
       setOk("Επιστροφή σε δοκιμαστική λειτουργία (mock).");
     } catch (err) {
-      setError(err.message);
+      setSaveError(err.message);
     } finally {
       setSwitchingLive(false);
     }
@@ -302,7 +299,9 @@ export default function SettingsPanel({ onSaved }) {
               </span>
             </label>
 
-            {error && <div className="alert alert-error">{error}</div>}
+            {(error || saveError) && (
+              <div className="alert alert-error">{saveError || error}</div>
+            )}
             {ok && <div className="alert alert-info">{ok}</div>}
 
             <button className="btn btn-primary btn-block" disabled={saving}>
